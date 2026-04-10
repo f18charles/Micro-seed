@@ -1,0 +1,178 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches auth.uid)
+    // Fields:
+    //   - uid: string (required) - matches auth.uid
+    //   - email: string (required) - user's email
+    //   - displayName: string (required)
+    //   - photoURL: string (optional)
+    //   - role: string (required, ['user', 'admin'])
+    //
+    // Collection: businesses
+    // Document ID: {businessId}
+    // Fields:
+    //   - id: string (required)
+    //   - userId: string (required) - owner's uid
+    //   - businessName: string (required, size < 100)
+    //   - industry: string (required)
+    //   - yearsInOperation: number (required, >= 0)
+    //   - monthlyRevenue: number (required, >= 0)
+    //   - monthlyExpenses: number (required, >= 0)
+    //   - location: string (required, size < 200)
+    //   - description: string (required, size < 2000)
+    //   - goals: string (required, size < 2000)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: assessments
+    // Document ID: {assessmentId}
+    // Fields:
+    //   - id: string (required)
+    //   - businessId: string (required)
+    //   - score: number (required, 0-100)
+    //   - potentialRating: string (required)
+    //   - analysis: string (required, size < 5000)
+    //   - recommendations: list (required, strings)
+    //   - loanEligibility: map (required)
+    //   - createdAt: string (required, ISO 8601)
+    //
+    // Collection: loans
+    // Document ID: {loanId}
+    // Fields:
+    //   - id: string (required)
+    //   - userId: string (required)
+    //   - businessId: string (required)
+    //   - amount: number (required, > 0)
+    //   - status: string (required, ['pending', 'approved', 'rejected', 'disbursed', 'repaid'])
+    //   - appliedAt: string (required, ISO 8601)
+    //   - assessmentId: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "favor.charles9@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'email', 'displayName', 'role']) &&
+             hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role']) &&
+             data.uid == request.auth.uid &&
+             data.email == request.auth.token.email &&
+             data.role in ['user', 'admin'] &&
+             data.displayName is string && data.displayName.size() < 100 &&
+             (data.photoURL == null || (data.photoURL is string && data.photoURL.size() < 500));
+    }
+
+    function isValidBusiness(data) {
+      return hasRequiredFields(['id', 'userId', 'businessName', 'industry', 'monthlyRevenue', 'monthlyExpenses', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.businessName is string && data.businessName.size() < 100 &&
+             data.monthlyRevenue is number && data.monthlyRevenue >= 0 &&
+             data.monthlyExpenses is number && data.monthlyExpenses >= 0 &&
+             data.location is string && data.location.size() < 200 &&
+             data.description is string && data.description.size() < 2000 &&
+             data.goals is string && data.goals.size() < 2000 &&
+             isValidDateString(data.createdAt);
+    }
+
+    function isValidAssessment(data) {
+      return hasRequiredFields(['id', 'businessId', 'score', 'potentialRating', 'analysis', 'createdAt']) &&
+             data.score is number && data.score >= 0 && data.score <= 100 &&
+             data.analysis is string && data.analysis.size() < 5000 &&
+             isValidDateString(data.createdAt);
+    }
+
+    function isValidLoan(data) {
+      return hasRequiredFields(['id', 'userId', 'businessId', 'amount', 'status', 'appliedAt', 'assessmentId']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number && data.amount > 0 &&
+             data.status in ['pending', 'approved', 'rejected', 'disbursed', 'repaid'] &&
+             isValidDateString(data.appliedAt);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin()) &&
+                    areImmutableFieldsUnchanged(['uid', 'email']);
+    }
+
+    match /businesses/{businessId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidBusiness(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && 
+                    isValidBusiness(request.resource.data) &&
+                    areImmutableFieldsUnchanged(['id', 'userId', 'createdAt']);
+      allow delete: if isAdmin();
+    }
+
+    match /assessments/{assessmentId} {
+      allow read: if isAuthenticated() && (get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidAssessment(request.resource.data) && 
+                    get(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.userId == request.auth.uid;
+      allow update: if isAdmin() && isValidAssessment(request.resource.data) && areImmutableFieldsUnchanged(['id', 'businessId', 'createdAt']);
+      allow delete: if isAdmin();
+    }
+
+    match /loans/{loanId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidLoan(request.resource.data);
+      allow update: if isAdmin() && isValidLoan(request.resource.data) && areImmutableFieldsUnchanged(['id', 'userId', 'businessId', 'appliedAt', 'assessmentId']);
+      allow delete: if isAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

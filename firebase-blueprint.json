@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user-specific settings and role information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Unique identifier for the user." },
+        "email": { "type": "string", "format": "email", "description": "User's email address." },
+        "displayName": { "type": "string", "description": "User's display name." },
+        "photoURL": { "type": "string", "description": "URL to user's profile picture." },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "User's role in the system." }
+      },
+      "required": ["uid", "email", "displayName", "role"]
+    },
+    "BusinessProfile": {
+      "title": "Business Profile",
+      "description": "Stores details about a user's business.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "businessName": { "type": "string" },
+        "industry": { "type": "string" },
+        "yearsInOperation": { "type": "number" },
+        "monthlyRevenue": { "type": "number" },
+        "monthlyExpenses": { "type": "number" },
+        "location": { "type": "string" },
+        "description": { "type": "string" },
+        "goals": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "businessName", "industry", "monthlyRevenue", "monthlyExpenses", "createdAt"]
+    },
+    "AssessmentResult": {
+      "title": "Assessment Result",
+      "description": "Stores the AI-generated assessment for a business.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessId": { "type": "string" },
+        "score": { "type": "number" },
+        "potentialRating": { "type": "string" },
+        "analysis": { "type": "string" },
+        "recommendations": { "type": "array", "items": { "type": "string" } },
+        "loanEligibility": {
+          "type": "object",
+          "properties": {
+            "eligible": { "type": "boolean" },
+            "maxAmount": { "type": "number" },
+            "interestRate": { "type": "number" },
+            "reasoning": { "type": "string" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessId", "score", "potentialRating", "analysis", "createdAt"]
+    },
+    "LoanApplication": {
+      "title": "Loan Application",
+      "description": "Stores details of a loan application.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "businessId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "disbursed", "repaid"] },
+        "appliedAt": { "type": "string", "format": "date-time" },
+        "assessmentId": { "type": "string" }
+      },
+      "required": ["id", "userId", "businessId", "amount", "status", "appliedAt", "assessmentId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document."
+    },
+    "/businesses/{businessId}": {
+      "schema": "BusinessProfile",
+      "description": "Business profile document."
+    },
+    "/assessments/{assessmentId}": {
+      "schema": "AssessmentResult",
+      "description": "AI assessment result document."
+    },
+    "/loans/{loanId}": {
+      "schema": "LoanApplication",
+      "description": "Loan application document."
+    }
+  }
+}
