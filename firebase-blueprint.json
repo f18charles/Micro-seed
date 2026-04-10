@@ -9,7 +9,10 @@
         "email": { "type": "string", "format": "email", "description": "User's email address." },
         "displayName": { "type": "string", "description": "User's display name." },
         "photoURL": { "type": "string", "description": "URL to user's profile picture." },
-        "role": { "type": "string", "enum": ["user", "admin"], "description": "User's role in the system." }
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "User's role in the system." },
+        "suspended": { "type": "boolean", "description": "Whether the user is suspended." },
+        "suspendedAt": { "type": "string", "format": "date-time" },
+        "suspendedReason": { "type": "string" }
       },
       "required": ["uid", "email", "displayName", "role"]
     },
@@ -65,11 +68,38 @@
         "userId": { "type": "string" },
         "businessId": { "type": "string" },
         "amount": { "type": "number" },
-        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "disbursed", "repaid"] },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected", "disbursed", "repaid", "written_off"] },
         "appliedAt": { "type": "string", "format": "date-time" },
-        "assessmentId": { "type": "string" }
+        "assessmentId": { "type": "string" },
+        "riskFlag": { "type": "string", "enum": ["low", "medium", "high"] },
+        "internalNotes": { "type": "string" }
       },
       "required": ["id", "userId", "businessId", "amount", "status", "appliedAt", "assessmentId"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Records administrative actions.",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "targetId": { "type": "string" },
+        "targetType": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["adminId", "adminEmail", "action", "targetId", "targetType", "createdAt"]
+    },
+    "GlobalSettings": {
+      "title": "Global Settings",
+      "description": "Platform-wide configuration.",
+      "type": "object",
+      "properties": {
+        "maintenanceMode": { "type": "boolean" },
+        "maintenanceMessage": { "type": "string" },
+        "defaultInterestRate": { "type": "number" }
+      },
+      "required": ["maintenanceMode", "defaultInterestRate"]
     }
   },
   "firestore": {
@@ -88,6 +118,14 @@
     "/loans/{loanId}": {
       "schema": "LoanApplication",
       "description": "Loan application document."
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Administrative audit logs."
+    },
+    "/app_settings/{docId}": {
+      "schema": "GlobalSettings",
+      "description": "Global application settings."
     }
   }
 }

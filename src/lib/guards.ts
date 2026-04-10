@@ -11,5 +11,9 @@ export function checkAuthGuard(user: UserProfile | null, view: string): { allowe
     return { allowed: false, reason: "Access denied. Admin privileges required." };
   }
 
+  if (user?.suspended && ['dashboard', 'assessment', 'profile'].includes(view)) {
+    return { allowed: false, reason: "Your account has been suspended. Please contact support." };
+  }
+
   return { allowed: true, reason: "" };
 }

@@ -64,7 +64,7 @@ export default function LandingPage({ onStart }: LandingPageProps) {
               <p className="text-sm text-neutral-500 uppercase tracking-wider">Businesses Funded</p>
             </div>
             <div>
-              <p className="text-3xl font-bold text-primary">$5M+</p>
+              <p className="text-3xl font-bold text-primary">KSh 500M+</p>
               <p className="text-sm text-neutral-500 uppercase tracking-wider">Capital Disbursed</p>
             </div>
             <div>

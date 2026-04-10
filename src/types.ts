@@ -54,16 +54,23 @@ export interface LoanApplication {
   userId: string;
   businessId: string;
   amount: number;
-  status: 'pending' | 'approved' | 'rejected' | 'disbursed' | 'repaid';
+  status: 'pending' | 'approved' | 'rejected' | 'disbursed' | 'repaid' | 'written_off';
   appliedAt: string | Timestamp;
   assessmentId: string;
   repaymentSchedule?: RepaymentSchedule[];
   disbursedAt?: string | Timestamp;
+  disbursedBy?: string;         // admin uid
   approvedAt?: string | Timestamp;
+  approvedBy?: string;         // admin uid
   rejectedAt?: string | Timestamp;
+  rejectedBy?: string;         // admin uid
   rejectionReason?: string;
   repaidAt?: string | Timestamp;
-  notes?: string; // admin notes
+  writtenOffAt?: string | Timestamp;
+  writtenOffReason?: string;
+  writtenOffBy?: string;        // admin uid
+  internalNotes?: string;       // admin-only, never shown to user
+  riskFlag?: 'low' | 'medium' | 'high';   // set by admin manually
 }
 
 export interface Notification {
@@ -106,4 +113,53 @@ export interface UserProfile {
   lastLoginAt?: string | Timestamp;
   phone?: string;
   currency?: Currency;
+  suspended?: boolean;
+  suspendedAt?: string | Timestamp;
+  suspendedReason?: string;
+  totalLoans?: number;          // denormalised count
+  totalDisbursed?: number;      // denormalised sum
+}
+
+export interface AuditLog {
+  id: string;
+  adminId: string;          // uid of admin who performed the action
+  adminEmail: string;
+  action: AuditAction;
+  targetId: string;         // document ID affected (loanId, userId, etc.)
+  targetType: 'loan' | 'user' | 'business' | 'assessment' | 'settings';
+  before: Record<string, unknown> | null;   // snapshot before change
+  after: Record<string, unknown> | null;    // snapshot after change
+  reason?: string;          // admin's stated reason
+  createdAt: string | Timestamp;
+  ipAddress?: string;
+}
+
+export type AuditAction =
+  | 'loan_approved'
+  | 'loan_rejected'
+  | 'loan_disbursed'
+  | 'loan_written_off'
+  | 'user_role_promoted'
+  | 'user_role_demoted'
+  | 'user_suspended'
+  | 'user_reinstated'
+  | 'user_deleted'
+  | 'repayment_marked_paid'
+  | 'repayment_marked_overdue'
+  | 'settings_updated'
+  | 'assessment_overridden';
+
+export interface GlobalSettings {
+  defaultInterestRate: number;        // e.g. 12 (percent)
+  maxLoanAmount: number;              // platform ceiling
+  minLoanAmount: number;
+  loanTermMonths: number;             // default 12
+  maintenanceMode: boolean;           // if true, show maintenance banner
+  maintenanceMessage: string;
+  allowNewRegistrations: boolean;
+  allowNewApplications: boolean;
+  platformName: string;
+  supportEmail: string;
+  updatedAt: string | Timestamp;
+  updatedBy: string;                  // admin uid
 }

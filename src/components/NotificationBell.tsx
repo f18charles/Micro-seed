@@ -7,7 +7,7 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-import { db, auth } from "../firebase";
+import { db, auth, handleFirestoreError, OperationType } from "../firebase";
 import { collection, query, where, orderBy, limit, onSnapshot, doc, updateDoc, writeBatch } from "firebase/firestore";
 import { Notification } from "../types";
 import { cn, formatDate } from "../lib/utils";
@@ -31,7 +31,7 @@ export default function NotificationBell() {
       const notifs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification));
       setNotifications(notifs);
       setUnreadCount(notifs.filter(n => !n.read).length);
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'notifications'));
 
     return () => unsubscribe();
   }, []);

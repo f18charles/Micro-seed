@@ -9,11 +9,11 @@ import NotificationBell from "./components/NotificationBell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DashboardSkeleton } from "./components/LoadingSkeletons";
 import BusinessSelector from "./components/BusinessSelector";
-import { BusinessProfile, AssessmentResult, LoanApplication, UserProfile, Currency } from "./types";
+import { BusinessProfile, AssessmentResult, LoanApplication, UserProfile, Currency, GlobalSettings } from "./types";
 import { assessBusinessPotential } from "./services/gemini";
 import { notificationService } from "./services/notifications";
 import { Toaster, toast } from "sonner";
-import { LogIn, LogOut, User as UserIcon, Loader2, ShieldCheck, LayoutDashboard, UserCircle } from "lucide-react";
+import { LogIn, LogOut, User as UserIcon, Loader2, ShieldCheck, LayoutDashboard, UserCircle, Ban } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { auth, db, googleProvider, OperationType, handleFirestoreError, serverTimestamp } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
@@ -36,6 +36,7 @@ type View = 'landing' | 'assessment' | 'dashboard' | 'profile' | 'admin' | 'not_
 export default function App() {
   const [view, setView] = useState<View>('landing');
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
   const [businesses, setBusinesses] = useState<BusinessProfile[]>([]);
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [assessments, setAssessments] = useState<AssessmentResult[]>([]);
@@ -45,6 +46,23 @@ export default function App() {
 
   // Inactivity Logout
   useInactivityLogout(30 * 60 * 1000);
+
+  // Maintenance Mode & Global Settings
+  useEffect(() => {
+    const unsubSettings = onSnapshot(doc(db, "app_settings", "global"), (snap) => {
+      if (snap.exists()) {
+        setGlobalSettings(snap.data() as GlobalSettings);
+      }
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'app_settings/global'));
+    
+    const handleExitAdmin = () => setView('dashboard');
+    window.addEventListener('exit-admin', handleExitAdmin);
+    
+    return () => {
+      unsubSettings();
+      window.removeEventListener('exit-admin', handleExitAdmin);
+    };
+  }, []);
 
   // Auth Listener
   useEffect(() => {
@@ -66,7 +84,10 @@ export default function App() {
             role: 'user',
             createdAt: serverTimestamp() as any,
             lastLoginAt: serverTimestamp() as any,
-            currency: 'KES'
+            currency: 'KES',
+            suspended: false,
+            totalLoans: 0,
+            totalDisbursed: 0
           };
           await setDoc(userRef, newUser);
           setUser(newUser);
@@ -83,6 +104,18 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      toast.info("Logged out");
+    } catch (error) {
+      toast.error("Failed to logout");
+    }
+  };
+
+  // Maintenance Check
+  const isMaintenanceActive = globalSettings?.maintenanceMode && user?.role !== 'admin';
 
   // Data Fetching
   useEffect(() => {
@@ -140,6 +173,59 @@ export default function App() {
     }
   }, [view, user]);
 
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-neutral-50">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (isMaintenanceActive) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-orange-50 p-6 text-center">
+        <div className="max-w-md space-y-6">
+          <div className="bg-orange-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto shadow-lg">
+            <ShieldCheck className="h-8 w-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-black text-orange-900 uppercase tracking-tight">Maintenance Mode</h1>
+          <p className="text-orange-800 leading-relaxed font-medium">
+            {globalSettings?.maintenanceMessage}
+          </p>
+          <Button variant="outline" className="border-orange-200 text-orange-700 hover:bg-orange-100" onClick={handleLogout}>
+            Logout
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (user?.suspended && view !== 'landing') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-red-50 p-6 text-center">
+        <div className="max-w-md space-y-6">
+          <div className="bg-red-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto shadow-lg">
+            <Ban className="h-8 w-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-black text-red-900 uppercase tracking-tight">Account Suspended</h1>
+          <p className="text-red-800 leading-relaxed font-medium">
+            Your account has been suspended. Please contact {globalSettings?.supportEmail || 'support@microseed.com'} for assistance.
+          </p>
+          <Button variant="outline" className="border-red-200 text-red-700 hover:bg-red-100" onClick={handleLogout}>
+            Logout
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'admin' && user?.role === 'admin') {
+    return <AdminDashboard />;
+  }
+
+  const activeBusiness = businesses.find(b => b.id === activeBusinessId) || null;
+  const currencySymbol = CURRENCY_CONFIG[user?.currency || 'KES'].symbol;
+
   const handleLogin = async () => {
     if (!checkRateLimit('login', 5, 10 * 60 * 1000)) {
       toast.error("Too many login attempts. Please wait.");
@@ -152,15 +238,6 @@ export default function App() {
     } catch (error) {
       console.error("Login error:", error);
       toast.error("Failed to login");
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      toast.info("Logged out");
-    } catch (error) {
-      toast.error("Failed to logout");
     }
   };
 
@@ -238,17 +315,6 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, 'loans');
     }
   };
-
-  const activeBusiness = businesses.find(b => b.id === activeBusinessId) || null;
-  const currencySymbol = CURRENCY_CONFIG[user?.currency || 'KES'].symbol;
-
-  if (!isAuthReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-neutral-50 flex flex-col">
