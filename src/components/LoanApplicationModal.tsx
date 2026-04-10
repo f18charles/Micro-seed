@@ -3,83 +3,96 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { CheckCircle2 } from "lucide-react";
+import { Slider } from "./ui/slider";
+import { formatCurrency } from "../lib/currency";
+import { Currency } from "../types";
+import { AlertCircle, Info } from "lucide-react";
+import { Alert, AlertDescription } from "./ui/alert";
 
 interface LoanApplicationModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onApply: (amount: number) => void;
   maxAmount: number;
-  onConfirm: (amount: number) => void;
+  currency: Currency;
 }
 
-export default function LoanApplicationModal({ isOpen, onClose, maxAmount, onConfirm }: LoanApplicationModalProps) {
-  const [amount, setAmount] = useState(maxAmount);
-  const [isSuccess, setIsSuccess] = useState(false);
+export default function LoanApplicationModal({ isOpen, onClose, onApply, maxAmount, currency }: LoanApplicationModalProps) {
+  const [amount, setAmount] = useState(Math.min(maxAmount, 1000));
 
-  const handleConfirm = () => {
-    onConfirm(amount);
-    setIsSuccess(true);
-    setTimeout(() => {
-      setIsSuccess(false);
-      onClose();
-    }, 2000);
+  const handleApply = () => {
+    onApply(amount);
+    onClose();
   };
+
+  const isInvalid = amount < 100 || amount > maxAmount;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px]">
-        {isSuccess ? (
-          <div className="flex flex-col items-center justify-center py-12 space-y-4">
-            <CheckCircle2 className="h-16 w-16 text-green-500 animate-bounce" />
-            <div className="text-center">
-              <h3 className="text-xl font-bold">Application Submitted!</h3>
-              <p className="text-neutral-500">We'll review your request and get back to you soon.</p>
+        <DialogHeader>
+          <DialogTitle className="text-2xl font-bold">Apply for Microloan</DialogTitle>
+          <DialogDescription>
+            Choose the amount you need. You are eligible for up to {formatCurrency(maxAmount, currency)}.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="grid gap-6 py-6">
+          <div className="space-y-4">
+            <div className="flex justify-between items-end">
+              <Label htmlFor="amount" className="text-sm font-bold text-neutral-500 uppercase">Loan Amount</Label>
+              <span className="text-2xl font-black text-primary">{formatCurrency(amount, currency)}</span>
+            </div>
+            
+            <Input 
+              id="amount" 
+              type="number" 
+              value={amount} 
+              onChange={(e) => setAmount(Number(e.target.value))}
+              onBlur={() => {
+                if (amount < 100) setAmount(100);
+                if (amount > maxAmount) setAmount(maxAmount);
+              }}
+              className="text-lg font-bold h-12"
+            />
+            
+            <div className="pt-4">
+              <Slider 
+                value={[amount]} 
+                onValueChange={(val) => setAmount(val[0])} 
+                max={maxAmount} 
+                min={100} 
+                step={100}
+                className="cursor-pointer"
+              />
+              <div className="flex justify-between text-[10px] text-neutral-400 mt-2 font-bold uppercase">
+                <span>Min: {formatCurrency(100, currency)}</span>
+                <span>Max: {formatCurrency(maxAmount, currency)}</span>
+              </div>
             </div>
           </div>
-        ) : (
-          <>
-            <DialogHeader>
-              <DialogTitle>Apply for Microloan</DialogTitle>
-              <DialogDescription>
-                Based on your business assessment, you are eligible for up to ${maxAmount.toLocaleString()}.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="amount">Loan Amount ($)</Label>
-                <Input 
-                  id="amount" 
-                  type="number" 
-                  value={amount} 
-                  onChange={(e) => setAmount(Number(e.target.value))}
-                  max={maxAmount}
-                  min={100}
-                />
-                <p className="text-xs text-neutral-500">Min: $100 | Max: ${maxAmount.toLocaleString()}</p>
-              </div>
-              <div className="p-4 bg-neutral-50 rounded-lg text-sm space-y-2">
-                <div className="flex justify-between">
-                  <span>Interest Rate</span>
-                  <span className="font-semibold">12% APR</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Term</span>
-                  <span className="font-semibold">12 Months</span>
-                </div>
-                <div className="flex justify-between border-t pt-2 mt-2">
-                  <span>Est. Monthly Payment</span>
-                  <span className="font-bold text-primary">${((amount * 1.12) / 12).toFixed(2)}</span>
-                </div>
-              </div>
+
+          <Alert className="bg-blue-50 border-blue-100 text-blue-800">
+            <Info className="h-4 w-4 text-blue-500" />
+            <AlertDescription className="text-xs">
+              This loan has a 12-month repayment term. Your interest rate is fixed based on your assessment.
+            </AlertDescription>
+          </Alert>
+
+          {isInvalid && (
+            <div className="flex items-center gap-2 text-destructive text-xs font-medium">
+              <AlertCircle className="h-4 w-4" />
+              Amount must be between {formatCurrency(100, currency)} and {formatCurrency(maxAmount, currency)}
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
-              <Button onClick={handleConfirm} disabled={amount > maxAmount || amount < 100}>
-                Confirm Application
-              </Button>
-            </DialogFooter>
-          </>
-        )}
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleApply} disabled={isInvalid} className="px-8">
+            Submit Application
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

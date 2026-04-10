@@ -2,48 +2,80 @@ import { useState, useEffect } from "react";
 import LandingPage from "./components/LandingPage";
 import AssessmentForm from "./components/AssessmentForm";
 import Dashboard from "./components/Dashboard";
-import { BusinessProfile, AssessmentResult, LoanApplication, UserProfile } from "./types";
+import ProfilePage from "./components/ProfilePage";
+import AdminDashboard from "./components/admin/AdminDashboard";
+import NotFoundPage from "./components/NotFoundPage";
+import NotificationBell from "./components/NotificationBell";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { DashboardSkeleton } from "./components/LoadingSkeletons";
+import BusinessSelector from "./components/BusinessSelector";
+import { BusinessProfile, AssessmentResult, LoanApplication, UserProfile, Currency } from "./types";
 import { assessBusinessPotential } from "./services/gemini";
+import { notificationService } from "./services/notifications";
 import { Toaster, toast } from "sonner";
-import { LogIn, LogOut, User as UserIcon, Loader2 } from "lucide-react";
+import { LogIn, LogOut, User as UserIcon, Loader2, ShieldCheck, LayoutDashboard, UserCircle } from "lucide-react";
 import { Button } from "./components/ui/button";
-import { auth, db, googleProvider, OperationType, handleFirestoreError } from "./firebase";
+import { auth, db, googleProvider, OperationType, handleFirestoreError, serverTimestamp } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
-import { doc, setDoc, getDoc, collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, query, where, onSnapshot, orderBy, updateDoc } from "firebase/firestore";
+import { checkAuthGuard } from "./lib/guards";
+import { useInactivityLogout } from "./lib/useInactivityLogout";
+import { checkRateLimit, recordAttempt } from "./lib/rateLimiter";
+import { CURRENCY_CONFIG } from "./lib/currency";
+import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
+} from "./components/ui/dropdown-menu";
 
-type View = 'landing' | 'assessment' | 'dashboard';
+type View = 'landing' | 'assessment' | 'dashboard' | 'profile' | 'admin' | 'not_found';
 
 export default function App() {
   const [view, setView] = useState<View>('landing');
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [profile, setProfile] = useState<BusinessProfile | null>(null);
-  const [assessment, setAssessment] = useState<AssessmentResult | null>(null);
+  const [businesses, setBusinesses] = useState<BusinessProfile[]>([]);
+  const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
+  const [assessments, setAssessments] = useState<AssessmentResult[]>([]);
   const [loans, setLoans] = useState<LoanApplication[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
+
+  // Inactivity Logout
+  useInactivityLogout(30 * 60 * 1000);
 
   // Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        const userDoc = await getDoc(userRef);
+        
         if (userDoc.exists()) {
-          setUser(userDoc.data() as UserProfile);
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          await updateDoc(userRef, { lastLoginAt: serverTimestamp() });
         } else {
           const newUser: UserProfile = {
             uid: firebaseUser.uid,
             email: firebaseUser.email || '',
             displayName: firebaseUser.displayName || 'User',
             photoURL: firebaseUser.photoURL || undefined,
-            role: 'user'
+            role: 'user',
+            createdAt: serverTimestamp() as any,
+            lastLoginAt: serverTimestamp() as any,
+            currency: 'KES'
           };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+          await setDoc(userRef, newUser);
           setUser(newUser);
         }
       } else {
         setUser(null);
-        setProfile(null);
-        setAssessment(null);
+        setBusinesses([]);
+        setActiveBusinessId(null);
+        setAssessments([]);
         setLoans([]);
         setView('landing');
       }
@@ -58,34 +90,62 @@ export default function App() {
 
     const businessesQuery = query(collection(db, 'businesses'), where('userId', '==', user.uid));
     const unsubBusinesses = onSnapshot(businessesQuery, (snapshot) => {
-      if (!snapshot.empty) {
-        const bizData = snapshot.docs[0].data() as BusinessProfile;
-        setProfile(bizData);
-        
-        // Fetch assessment for this business
-        const assessmentsQuery = query(collection(db, 'assessments'), where('businessId', '==', bizData.id));
-        onSnapshot(assessmentsQuery, (asmtSnapshot) => {
-          if (!asmtSnapshot.empty) {
-            setAssessment(asmtSnapshot.docs[0].data() as AssessmentResult);
-            if (view === 'landing' || view === 'assessment') setView('dashboard');
-          }
-        }, (err) => handleFirestoreError(err, OperationType.LIST, 'assessments'));
+      const bizData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as BusinessProfile));
+      setBusinesses(bizData);
+      
+      if (bizData.length > 0 && !activeBusinessId) {
+        setActiveBusinessId(bizData[0].id);
       }
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'businesses'));
 
-    const loansQuery = query(collection(db, 'loans'), where('userId', '==', user.uid), orderBy('appliedAt', 'desc'));
+    return () => unsubBusinesses();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !activeBusinessId) return;
+
+    const assessmentsQuery = query(
+      collection(db, 'assessments'), 
+      where('businessId', '==', activeBusinessId),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubAssessments = onSnapshot(assessmentsQuery, (snapshot) => {
+      const asmtData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AssessmentResult));
+      setAssessments(asmtData);
+      if (view === 'landing' || view === 'assessment') setView('dashboard');
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'assessments'));
+
+    const loansQuery = query(
+      collection(db, 'loans'), 
+      where('businessId', '==', activeBusinessId), 
+      orderBy('appliedAt', 'desc')
+    );
     const unsubLoans = onSnapshot(loansQuery, (snapshot) => {
-      const loansData = snapshot.docs.map(doc => doc.data() as LoanApplication);
+      const loansData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LoanApplication));
       setLoans(loansData);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'loans'));
 
     return () => {
-      unsubBusinesses();
+      unsubAssessments();
       unsubLoans();
     };
-  }, [user]);
+  }, [user, activeBusinessId]);
+
+  // View Guard
+  useEffect(() => {
+    const guard = checkAuthGuard(user, view);
+    if (!guard.allowed) {
+      if (user) toast.error(guard.reason);
+      setView('landing');
+    }
+  }, [view, user]);
 
   const handleLogin = async () => {
+    if (!checkRateLimit('login', 5, 10 * 60 * 1000)) {
+      toast.error("Too many login attempts. Please wait.");
+      return;
+    }
+    recordAttempt('login');
     try {
       await signInWithPopup(auth, googleProvider);
       toast.success("Logged in successfully");
@@ -104,24 +164,22 @@ export default function App() {
     }
   };
 
-  const handleStart = () => {
-    if (!user) {
-      handleLogin();
-    } else {
-      setView(profile ? 'dashboard' : 'assessment');
-    }
-  };
-
   const handleAssessmentSubmit = async (values: any) => {
     if (!user) return;
+    if (!checkRateLimit('assessment', 3, 60 * 60 * 1000)) {
+      toast.error("You've submitted too many assessments. Please wait an hour.");
+      return;
+    }
+    recordAttempt('assessment');
+    
     setIsLoading(true);
     try {
-      const bizId = 'biz_' + Date.now();
+      const bizId = activeBusinessId && view === 'dashboard' ? activeBusinessId : 'biz_' + Date.now();
       const newProfile: BusinessProfile = {
         ...values,
         id: bizId,
         userId: user.uid,
-        createdAt: new Date().toISOString(),
+        createdAt: serverTimestamp() as any,
       };
       
       const result = await assessBusinessPotential(newProfile);
@@ -131,15 +189,19 @@ export default function App() {
         ...result,
         id: assessmentId,
         businessId: bizId,
-        createdAt: new Date().toISOString(),
+        createdAt: serverTimestamp() as any,
       };
 
-      // Save to Firestore
-      await setDoc(doc(db, 'businesses', bizId), newProfile);
+      if (!activeBusinessId || view !== 'dashboard') {
+        await setDoc(doc(db, 'businesses', bizId), newProfile);
+      } else {
+        await updateDoc(doc(db, 'businesses', bizId), values);
+      }
+      
       await setDoc(doc(db, 'assessments', assessmentId), assessmentResult);
+      await notificationService.sendAssessmentComplete(user.uid, newProfile.businessName, assessmentResult.score);
 
-      setProfile(newProfile);
-      setAssessment(assessmentResult);
+      setActiveBusinessId(bizId);
       setView('dashboard');
       toast.success("Assessment complete!");
     } catch (error) {
@@ -151,18 +213,23 @@ export default function App() {
   };
 
   const handleApplyLoan = async (amount: number) => {
-    if (!user || !profile || !assessment) return;
+    if (!user || !activeBusinessId || assessments.length === 0) return;
+    if (!checkRateLimit('loan_application', 2, 24 * 60 * 60 * 1000)) {
+      toast.error("Too many loan applications. Please wait 24 hours.");
+      return;
+    }
+    recordAttempt('loan_application');
     
     try {
       const loanId = 'loan_' + Date.now();
       const newLoan: LoanApplication = {
         id: loanId,
         userId: user.uid,
-        businessId: profile.id,
+        businessId: activeBusinessId,
         amount: amount,
         status: 'pending',
-        appliedAt: new Date().toISOString(),
-        assessmentId: assessment.id,
+        appliedAt: serverTimestamp() as any,
+        assessmentId: assessments[0].id,
       };
 
       await setDoc(doc(db, 'loans', loanId), newLoan);
@@ -171,6 +238,9 @@ export default function App() {
       handleFirestoreError(error, OperationType.WRITE, 'loans');
     }
   };
+
+  const activeBusiness = businesses.find(b => b.id === activeBusinessId) || null;
+  const currencySymbol = CURRENCY_CONFIG[user?.currency || 'KES'].symbol;
 
   if (!isAuthReady) {
     return (
@@ -181,31 +251,78 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <Toaster position="top-center" />
+    <div className="min-h-screen bg-neutral-50 flex flex-col">
+      <Toaster position="top-center" richColors />
       
       {/* Navigation */}
       <nav className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('landing')}>
-              <div className="bg-primary p-1.5 rounded-lg">
-                <div className="w-5 h-5 bg-white rounded-sm" />
+            <div className="flex items-center gap-8">
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('landing')}>
+                <div className="bg-primary p-1.5 rounded-lg">
+                  <div className="w-5 h-5 bg-white rounded-sm" />
+                </div>
+                <span className="text-xl font-bold tracking-tight">MicroSeed</span>
               </div>
-              <span className="text-xl font-bold tracking-tight">MicroSeed</span>
+
+              {user && businesses.length > 0 && (
+                <div className="hidden md:block">
+                  <BusinessSelector 
+                    businesses={businesses} 
+                    activeId={activeBusinessId} 
+                    onSelect={setActiveBusinessId} 
+                    onAddNew={() => setView('assessment')}
+                  />
+                </div>
+              )}
             </div>
             
             <div className="flex items-center gap-4">
               {user ? (
-                <div className="flex items-center gap-4">
-                  <div className="hidden sm:flex items-center gap-2 text-sm text-neutral-600">
-                    <UserIcon className="h-4 w-4" />
-                    {user.displayName}
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={handleLogout}>
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Logout
-                  </Button>
+                <div className="flex items-center gap-2 sm:gap-4">
+                  <NotificationBell />
+                  
+                  <DropdownMenu>
+                    <DropdownMenuTrigger>
+                      <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0">
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={user.photoURL} referrerPolicy="no-referrer" />
+                          <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                            {user.displayName.slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-56" align="end">
+                      <div className="flex items-center justify-start gap-2 p-2">
+                        <div className="flex flex-col space-y-1 leading-none">
+                          <p className="font-medium text-sm">{user.displayName}</p>
+                          <p className="text-xs text-muted-foreground truncate w-[180px]">{user.email}</p>
+                        </div>
+                      </div>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setView('dashboard')}>
+                        <LayoutDashboard className="mr-2 h-4 w-4" />
+                        Dashboard
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setView('profile')}>
+                        <UserCircle className="mr-2 h-4 w-4" />
+                        Profile
+                      </DropdownMenuItem>
+                      {user.role === 'admin' && (
+                        <DropdownMenuItem onClick={() => setView('admin')} className="text-primary font-bold">
+                          <ShieldCheck className="mr-2 h-4 w-4" />
+                          Admin Panel
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleLogout} className="text-destructive">
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Logout
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               ) : (
                 <Button variant="default" size="sm" onClick={handleLogin}>
@@ -219,17 +336,44 @@ export default function App() {
       </nav>
 
       {/* Main Content */}
-      <main>
-        {view === 'landing' && <LandingPage onStart={handleStart} />}
-        {view === 'assessment' && <AssessmentForm onSubmit={handleAssessmentSubmit} isLoading={isLoading} />}
-        {view === 'dashboard' && profile && (
-          <Dashboard 
-            profile={profile} 
-            assessment={assessment} 
-            loans={loans} 
-            onApplyLoan={handleApplyLoan} 
-          />
-        )}
+      <main className="flex-grow">
+        <ErrorBoundary>
+          {isLoading && view === 'dashboard' ? (
+            <DashboardSkeleton />
+          ) : (
+            <>
+              {view === 'landing' && <LandingPage onStart={() => setView(user ? (businesses.length > 0 ? 'dashboard' : 'assessment') : 'landing')} />}
+              {view === 'assessment' && (
+                <AssessmentForm 
+                  onSubmit={handleAssessmentSubmit} 
+                  isLoading={isLoading} 
+                  currencySymbol={currencySymbol}
+                  initialData={activeBusiness || undefined}
+                />
+              )}
+              {view === 'dashboard' && activeBusiness && (
+                <Dashboard 
+                  profile={activeBusiness} 
+                  assessment={assessments[0] || null} 
+                  allAssessments={assessments}
+                  loans={loans} 
+                  onApplyLoan={handleApplyLoan} 
+                  onReassess={() => setView('assessment')}
+                  currency={user?.currency || 'KES'}
+                />
+              )}
+              {view === 'profile' && user && (
+                <ProfilePage 
+                  user={user} 
+                  businesses={businesses} 
+                  onViewDashboard={(id) => { setActiveBusinessId(id); setView('dashboard'); }} 
+                />
+              )}
+              {view === 'admin' && <AdminDashboard />}
+              {view === 'not_found' && <NotFoundPage onGoHome={() => setView('landing')} />}
+            </>
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}

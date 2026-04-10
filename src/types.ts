@@ -1,3 +1,5 @@
+import { Timestamp } from "firebase/firestore";
+
 export type BusinessIndustry = 
   | 'retail' 
   | 'food_beverage' 
@@ -18,7 +20,7 @@ export interface BusinessProfile {
   location: string;
   description: string;
   goals: string;
-  createdAt: string;
+  createdAt: string | Timestamp;
 }
 
 export interface AssessmentResult {
@@ -34,7 +36,17 @@ export interface AssessmentResult {
     interestRate: number;
     reasoning: string;
   };
-  createdAt: string;
+  createdAt: string | Timestamp;
+}
+
+export interface RepaymentSchedule {
+  installmentNumber: number;
+  dueDate: string | Timestamp;
+  amount: number;
+  principal: number;
+  interest: number;
+  status: 'upcoming' | 'paid' | 'overdue';
+  paidAt?: string | Timestamp;
 }
 
 export interface LoanApplication {
@@ -43,8 +55,45 @@ export interface LoanApplication {
   businessId: string;
   amount: number;
   status: 'pending' | 'approved' | 'rejected' | 'disbursed' | 'repaid';
-  appliedAt: string;
+  appliedAt: string | Timestamp;
   assessmentId: string;
+  repaymentSchedule?: RepaymentSchedule[];
+  disbursedAt?: string | Timestamp;
+  approvedAt?: string | Timestamp;
+  rejectedAt?: string | Timestamp;
+  rejectionReason?: string;
+  repaidAt?: string | Timestamp;
+  notes?: string; // admin notes
+}
+
+export interface Notification {
+  id: string;
+  userId: string;
+  type: 'loan_approved' | 'loan_rejected' | 'loan_disbursed' | 'repayment_due' | 'repayment_overdue' | 'assessment_complete';
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: string | Timestamp;
+  loanId?: string;
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  totalBusinesses: number;
+  totalLoans: number;
+  pendingLoans: number;
+  approvedLoans: number;
+  totalDisbursed: number;
+  totalRepaid: number;
+  defaultRate: number;
+}
+
+export type Currency = 'KES' | 'USD' | 'UGX' | 'TZS' | 'NGN' | 'GHS' | 'ZAR';
+
+export interface AppSettings {
+  currency: Currency;
+  currencySymbol: string;
+  locale: string;
 }
 
 export interface UserProfile {
@@ -53,4 +102,8 @@ export interface UserProfile {
   displayName: string;
   photoURL?: string;
   role: 'user' | 'admin';
+  createdAt?: string | Timestamp;
+  lastLoginAt?: string | Timestamp;
+  phone?: string;
+  currency?: Currency;
 }

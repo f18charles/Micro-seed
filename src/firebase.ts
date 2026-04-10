@@ -1,11 +1,21 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, onSnapshot, addDoc, getDocFromServer } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, browserSessionPersistence, setPersistence } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, serverTimestamp, getDocFromServer, Timestamp } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+
+// Env Var Guard
+const requiredEnvVars = ['GEMINI_API_KEY']; 
+// Note: firebase-applet-config.json handles the firebase keys
+if (!process.env.GEMINI_API_KEY) {
+  console.error("Missing required environment variable: GEMINI_API_KEY");
+}
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+// Set session persistence
+setPersistence(auth, browserSessionPersistence);
+
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -61,6 +71,25 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
+// Notification Helper
+export async function createNotification(userId: string, type: string, title: string, message: string, loanId?: string) {
+  try {
+    const notificationId = 'notif_' + Date.now();
+    await setDoc(doc(db, 'notifications', notificationId), {
+      id: notificationId,
+      userId,
+      type,
+      title,
+      message,
+      read: false,
+      createdAt: serverTimestamp(),
+      loanId
+    });
+  } catch (error) {
+    console.error("Failed to create notification:", error);
+  }
+}
+
 // Test connection
 async function testConnection() {
   try {
@@ -72,3 +101,5 @@ async function testConnection() {
   }
 }
 testConnection();
+
+export { serverTimestamp, Timestamp };
