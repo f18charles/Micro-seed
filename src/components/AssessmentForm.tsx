@@ -76,6 +76,16 @@ export default function AssessmentForm({ onSubmit, isLoading, currencySymbol, in
     }
   };
 
+  const handleDocumentDelete = (doc: SubmittedDocument) => {
+    setDocuments(prev => {
+      const next = { ...prev };
+      delete next[doc.type];
+      return next;
+    });
+    const currentIds = watch("documentIds") || [];
+    setValue("documentIds", currentIds.filter(id => id !== doc.id));
+  };
+
   const nextStep = async () => {
     let fieldsToValidate: (keyof AssessmentFormData)[] = [];
     if (step === 1) fieldsToValidate = ["businessName", "industry", "location"];
@@ -266,6 +276,7 @@ export default function AssessmentForm({ onSubmit, isLoading, currencySymbol, in
                       required={true} 
                       userId={auth.currentUser?.uid || ''} 
                       onUploadComplete={handleDocumentUpload}
+                      onDelete={handleDocumentDelete}
                       existingDocument={documents['mpesa_statement']}
                       periodRequired={true}
                     />
@@ -276,6 +287,7 @@ export default function AssessmentForm({ onSubmit, isLoading, currencySymbol, in
                       required={false} 
                       userId={auth.currentUser?.uid || ''} 
                       onUploadComplete={handleDocumentUpload}
+                      onDelete={handleDocumentDelete}
                       existingDocument={documents['bank_statement']}
                       periodRequired={true}
                     />
@@ -316,6 +328,7 @@ export default function AssessmentForm({ onSubmit, isLoading, currencySymbol, in
                       required={false} 
                       userId={auth.currentUser?.uid || ''} 
                       onUploadComplete={handleDocumentUpload}
+                      onDelete={handleDocumentDelete}
                       existingDocument={documents['business_permit']}
                     />
                     <DocumentUpload 

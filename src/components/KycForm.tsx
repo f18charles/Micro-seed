@@ -67,6 +67,14 @@ export default function KycForm({ onComplete, existingRecord }: KycFormProps) {
     setDocuments(prev => ({ ...prev, [doc.type]: doc }));
   };
 
+  const handleDocumentDelete = (doc: SubmittedDocument) => {
+    setDocuments(prev => {
+      const next = { ...prev };
+      delete next[doc.type];
+      return next;
+    });
+  };
+
   const validateStep1 = () => {
     if (!formData.fullLegalName || !formData.dateOfBirth || !formData.physicalAddress || !formData.nationalIdNumber || !formData.kraPinNumber) {
       toast.error("Please fill in all identity fields");
@@ -181,6 +189,7 @@ export default function KycForm({ onComplete, existingRecord }: KycFormProps) {
             required={true} 
             userId={auth.currentUser?.uid || ''} 
             onUploadComplete={handleDocumentUpload}
+            onDelete={handleDocumentDelete}
             existingDocument={documents['national_id']}
           />
           <DocumentUpload 
@@ -190,6 +199,7 @@ export default function KycForm({ onComplete, existingRecord }: KycFormProps) {
             required={true} 
             userId={auth.currentUser?.uid || ''} 
             onUploadComplete={handleDocumentUpload}
+            onDelete={handleDocumentDelete}
             existingDocument={documents['nationalidback']}
           />
           <DocumentUpload 
@@ -199,6 +209,7 @@ export default function KycForm({ onComplete, existingRecord }: KycFormProps) {
             required={true} 
             userId={auth.currentUser?.uid || ''} 
             onUploadComplete={handleDocumentUpload}
+            onDelete={handleDocumentDelete}
             existingDocument={documents['kra_pin']}
           />
         </div>

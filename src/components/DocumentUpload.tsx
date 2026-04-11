@@ -17,6 +17,7 @@ import { Label } from './ui/label';
 import { useDocumentUpload } from '../services/documentService';
 import { SubmittedDocument, DocumentType } from '../types';
 import { cn } from '../lib/utils';
+import { toast } from 'sonner';
 
 interface DocumentUploadProps {
   documentType: DocumentType;
@@ -54,20 +55,35 @@ export default function DocumentUpload({
 
   const handleFile = async (file: File) => {
     if (periodRequired && (!period.from || !period.to)) {
-      alert("Please specify the period covered by this document first.");
+      toast.error("Please specify the period covered by this document first.");
       return;
     }
 
-    const metadata: Partial<SubmittedDocument> = {
-      type: documentType,
-      loanApplicationId: applicationId,
-      guarantorId: guarantorId,
-      periodCovered: periodRequired ? period : undefined
-    };
+    if (!userId) {
+      toast.error("You must be logged in to upload documents.");
+      return;
+    }
 
-    const result = await upload(file, userId, metadata);
-    if (result) {
-      onUploadComplete(result);
+    try {
+      const metadata: Partial<SubmittedDocument> = {
+        type: documentType,
+        loanApplicationId: applicationId,
+        guarantorId: guarantorId,
+        periodCovered: periodRequired ? period : undefined
+      };
+
+      const result = await upload(file, userId, metadata);
+      if (result) {
+        onUploadComplete(result);
+        toast.success(`${label} uploaded successfully`);
+      }
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      toast.error(err.message || "Failed to upload document");
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -81,6 +97,16 @@ export default function DocumentUpload({
   const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) handleFile(file);
+  };
+
+  const handleDelete = async () => {
+    if (!existingDocument || !onDelete) return;
+    try {
+      onDelete(existingDocument);
+      toast.success(`${label} removed`);
+    } catch (err: any) {
+      toast.error("Failed to remove document");
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -160,7 +186,7 @@ export default function DocumentUpload({
                 variant="ghost" 
                 size="icon" 
                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={() => onDelete(existingDocument)}
+                onClick={handleDelete}
               >
                 <Trash2 className="w-4 h-4" />
               </Button>
@@ -222,3 +248,4 @@ export default function DocumentUpload({
     </div>
   );
 }
+

@@ -225,11 +225,11 @@ export default function PaymentGateway() {
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
-                      <DropdownMenuTrigger>
+                      <DropdownMenuTrigger render={
                         <Button variant="ghost" size="icon">
                           <MoreHorizontal className="w-4 h-4" />
                         </Button>
-                      </DropdownMenuTrigger>
+                      } />
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => setSelectedTx(tx)}>
                           <FileText className="w-4 h-4 mr-2" /> View Details

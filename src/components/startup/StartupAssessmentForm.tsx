@@ -182,6 +182,14 @@ export const StartupAssessmentForm: React.FC<StartupAssessmentFormProps> = ({ on
     setDocuments(prev => ({ ...prev, [doc.type]: doc }));
   };
 
+  const handleDocumentDelete = (doc: any) => {
+    setDocuments(prev => {
+      const next = { ...prev };
+      delete next[doc.type];
+      return next;
+    });
+  };
+
   const onFinalSubmit = (data: StartupFormData) => {
     if (Math.abs(totalAllocated - requestedAmount) > 500) {
       toast.error(`Loan usage total (${currencySymbol}${totalAllocated.toLocaleString()}) must match requested amount (${currencySymbol}${requestedAmount.toLocaleString()})`);
@@ -895,6 +903,7 @@ export const StartupAssessmentForm: React.FC<StartupAssessmentFormProps> = ({ on
                             required={true} 
                             userId={auth.currentUser?.uid || ''} 
                             onUploadComplete={handleDocumentUpload}
+                            onDelete={handleDocumentDelete}
                             existingDocument={documents['businessplandocument']}
                           />
                           <DocumentUpload 
@@ -904,7 +913,9 @@ export const StartupAssessmentForm: React.FC<StartupAssessmentFormProps> = ({ on
                             required={true} 
                             userId={auth.currentUser?.uid || ''} 
                             onUploadComplete={handleDocumentUpload}
+                            onDelete={handleDocumentDelete}
                             existingDocument={documents['personalmpesastatement']}
+                            periodRequired={true}
                           />
                         </div>
                       </div>
