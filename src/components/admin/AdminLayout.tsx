@@ -9,19 +9,23 @@ import {
   ArrowLeft,
   Menu,
   X,
-  ShieldAlert
+  ShieldAlert,
+  FileSearch,
+  Settings2,
+  CreditCard
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 
-export type AdminTab = 'overview' | 'loans' | 'users' | 'analytics' | 'repayments' | 'settings';
+export type AdminTab = 'overview' | 'loans' | 'users' | 'analytics' | 'repayments' | 'settings' | 'documents' | 'lender_config' | 'payments';
 
 interface AdminLayoutProps {
   activeTab: AdminTab;
   onTabChange: (tab: AdminTab) => void;
   onExit: () => void;
   pendingLoansCount?: number;
+  pendingDocsCount?: number;
   children: React.ReactNode;
 }
 
@@ -30,6 +34,7 @@ export default function AdminLayout({
   onTabChange, 
   onExit, 
   pendingLoansCount = 0,
+  pendingDocsCount = 0,
   children 
 }: AdminLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -37,10 +42,13 @@ export default function AdminLayout({
   const navItems: { id: AdminTab; label: string; icon: any; badge?: number }[] = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'loans', label: 'Loans', icon: FileText, badge: pendingLoansCount },
+    { id: 'documents', label: 'Doc Review', icon: FileSearch, badge: pendingDocsCount },
+    { id: 'payments', label: 'Payment Gateway', icon: CreditCard },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'repayments', label: 'Repayments', icon: CalendarClock },
-    { id: 'settings', label: 'Settings', icon: Settings },
+    { id: 'lender_config', label: 'Lender Config', icon: Settings2 },
+    { id: 'settings', label: 'Admin Settings', icon: Settings },
   ];
 
   return (

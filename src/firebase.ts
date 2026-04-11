@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, browserSessionPersistence, setPersistence } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, serverTimestamp, getDocFromServer, Timestamp } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, serverTimestamp, getDocFromServer, Timestamp, FieldValue } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Env Var Guard
@@ -17,6 +18,7 @@ export const auth = getAuth(app);
 setPersistence(auth, browserSessionPersistence);
 
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 // Error Handling for Firestore
@@ -102,4 +104,4 @@ async function testConnection() {
 }
 testConnection();
 
-export { serverTimestamp, Timestamp };
+export { serverTimestamp, Timestamp, FieldValue };

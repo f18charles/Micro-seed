@@ -1,9 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { BusinessProfile, AssessmentResult, LoanApplication } from "../types";
+import { BusinessProfile, AssessmentResult } from "../types";
 import { sanitiseText } from "../lib/sanitise";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-const model = "gemini-3-flash-preview";
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export async function assessBusinessPotential(profile: BusinessProfile): Promise<Omit<AssessmentResult, 'id' | 'businessId' | 'createdAt'>> {
   const prompt = `
@@ -27,7 +26,7 @@ export async function assessBusinessPotential(profile: BusinessProfile): Promise
 
   try {
     const response = await ai.models.generateContent({
-      model,
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -78,7 +77,7 @@ export async function generateGrowthPlan(profile: BusinessProfile, assessment: A
 
   try {
     const response = await ai.models.generateContent({
-      model,
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",

@@ -28,10 +28,13 @@ import {
 } from "recharts";
 import LoanApplicationModal from "./LoanApplicationModal";
 import RepaymentSchedule from "./RepaymentSchedule";
+import PaymentView from "./PaymentView";
+import GuarantorInvitation from "./GuarantorInvitation";
 import { formatCurrency } from "../lib/currency";
 import { formatDate } from "../lib/utils";
 import { generateGrowthPlan } from "../services/gemini";
 import { toast } from "sonner";
+import { cn } from "../lib/utils";
 
 interface DashboardProps {
   profile: BusinessProfile;
@@ -40,12 +43,14 @@ interface DashboardProps {
   loans: LoanApplication[];
   onApplyLoan: (amount: number) => void;
   onReassess: () => void;
+  onAppeal: (loanId: string) => void;
   currency: Currency;
 }
 
-export default function Dashboard({ profile, assessment, allAssessments, loans, onApplyLoan, onReassess, currency }: DashboardProps) {
+export default function Dashboard({ profile, assessment, allAssessments, loans, onApplyLoan, onReassess, onAppeal, currency }: DashboardProps) {
   const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [growthPlan, setGrowthPlan] = useState<any>(null);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
@@ -70,6 +75,7 @@ export default function Dashboard({ profile, assessment, allAssessments, loans, 
   };
 
   const activeLoan = loans.find(l => l.status === 'approved' || l.status === 'disbursed');
+  const selectedLoan = loans.find(l => l.id === selectedLoanId) || activeLoan;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
@@ -261,8 +267,51 @@ export default function Dashboard({ profile, assessment, allAssessments, loans, 
           </Card>
 
           {/* Active Loan / Repayment */}
-          {activeLoan && (
-            <RepaymentSchedule loan={activeLoan} currency={currency} />
+          {selectedLoan && (
+            <div className="space-y-6">
+              <Card className="border-2 border-primary/20">
+                <CardHeader className="pb-2">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-lg">Loan Details</CardTitle>
+                    <Badge className="uppercase">{selectedLoan.status}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {(selectedLoan.status === 'approved' || selectedLoan.status === 'disbursed') ? (
+                    <PaymentView loan={selectedLoan} />
+                  ) : selectedLoan.status === 'pending' ? (
+                    <div className="space-y-6">
+                      <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 flex gap-3">
+                        <RefreshCw className="w-5 h-5 text-amber-600 shrink-0 animate-spin" />
+                        <p className="text-sm text-amber-800">
+                          Your application is currently being reviewed. You can increase your chances by inviting guarantors.
+                        </p>
+                      </div>
+                      <GuarantorInvitation 
+                        applicationId={selectedLoan.id} 
+                        minGuarantors={1} 
+                        onComplete={() => {}} 
+                      />
+                    </div>
+                  ) : selectedLoan.status === 'rejected' ? (
+                    <div className="space-y-4">
+                      <div className="p-4 bg-red-50 rounded-xl border border-red-100 flex gap-3">
+                        <Target className="w-5 h-5 text-red-600 shrink-0" />
+                        <div className="space-y-1">
+                          <p className="text-sm font-bold text-red-900">Application Rejected</p>
+                          <p className="text-xs text-red-800">
+                            We couldn't approve your loan at this time. You can submit an appeal if you have additional information to share.
+                          </p>
+                        </div>
+                      </div>
+                      <Button className="w-full" variant="outline" onClick={() => onAppeal(selectedLoan.id)}>
+                        Appeal Decision
+                      </Button>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {/* Loan History */}
@@ -279,7 +328,14 @@ export default function Dashboard({ profile, assessment, allAssessments, loans, 
                   <div className="p-6 text-center text-xs text-neutral-500">No loan history</div>
                 ) : (
                   loans.map(loan => (
-                    <div key={loan.id} className="p-4 flex justify-between items-center">
+                    <div 
+                      key={loan.id} 
+                      className={cn(
+                        "p-4 flex justify-between items-center cursor-pointer hover:bg-neutral-50 transition-colors",
+                        selectedLoanId === loan.id && "bg-primary/5 border-l-4 border-primary"
+                      )}
+                      onClick={() => setSelectedLoanId(loan.id)}
+                    >
                       <div>
                         <p className="text-sm font-bold">{formatCurrency(loan.amount, currency)}</p>
                         <p className="text-[10px] text-neutral-500">{formatDate(loan.appliedAt, 'MMM d, yyyy')}</p>

@@ -4,6 +4,8 @@ import AssessmentForm from "./components/AssessmentForm";
 import Dashboard from "./components/Dashboard";
 import ProfilePage from "./components/ProfilePage";
 import AdminDashboard from "./components/admin/AdminDashboard";
+import GuarantorConsent from "./components/GuarantorConsent";
+import AppealForm from "./components/AppealForm";
 import NotFoundPage from "./components/NotFoundPage";
 import NotificationBell from "./components/NotificationBell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -11,6 +13,8 @@ import { DashboardSkeleton } from "./components/LoadingSkeletons";
 import BusinessSelector from "./components/BusinessSelector";
 import { BusinessProfile, AssessmentResult, LoanApplication, UserProfile, Currency, GlobalSettings } from "./types";
 import { assessBusinessPotential } from "./services/gemini";
+import { runFraudCheck } from "./services/fraudDetection";
+import { buildFinancialEvidenceSummary } from "./services/financialEvidence";
 import { notificationService } from "./services/notifications";
 import { Toaster, toast } from "sonner";
 import { LogIn, LogOut, User as UserIcon, Loader2, ShieldCheck, LayoutDashboard, UserCircle, Ban } from "lucide-react";
@@ -31,7 +35,7 @@ import {
   DropdownMenuSeparator
 } from "./components/ui/dropdown-menu";
 
-type View = 'landing' | 'assessment' | 'dashboard' | 'profile' | 'admin' | 'not_found';
+type View = 'landing' | 'assessment' | 'dashboard' | 'profile' | 'admin' | 'not_found' | 'guarantor_consent' | 'appeal';
 
 export default function App() {
   const [view, setView] = useState<View>('landing');
@@ -43,6 +47,15 @@ export default function App() {
   const [loans, setLoans] = useState<LoanApplication[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [activeLoanId, setActiveLoanId] = useState<string | null>(null);
+
+  // Check for guarantor token on load
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('token')) {
+      setView('guarantor_consent');
+    }
+  }, []);
 
   // Inactivity Logout
   useInactivityLogout(30 * 60 * 1000);
@@ -252,6 +265,7 @@ export default function App() {
     setIsLoading(true);
     try {
       const bizId = activeBusinessId && view === 'dashboard' ? activeBusinessId : 'biz_' + Date.now();
+      const assessmentId = 'asmt_' + Date.now();
       const newProfile: BusinessProfile = {
         ...values,
         id: bizId,
@@ -259,14 +273,37 @@ export default function App() {
         createdAt: serverTimestamp() as any,
       };
       
+      // 1. Basic AI Assessment
       const result = await assessBusinessPotential(newProfile);
       
-      const assessmentId = 'asmt_' + Date.now();
+      // 2. Financial Evidence Analysis (if documents provided)
+      let evidenceSummary = null;
+      if (values.documents && values.documents.length > 0) {
+        evidenceSummary = await buildFinancialEvidenceSummary(assessmentId, bizId, values.documents);
+        
+        // Adjust score based on evidence
+        if (evidenceSummary.trend === 'growing') result.score += 5;
+        if (evidenceSummary.trend === 'declining') result.score -= 10;
+        
+        // Check for revenue deviation
+        const claimedRevenue = values.monthlyRevenue;
+        const actualRevenue = evidenceSummary.averageMonthlyRevenue;
+        const deviation = Math.abs((claimedRevenue - actualRevenue) / claimedRevenue) * 100;
+        
+        if (deviation > 20) {
+          result.score -= 15;
+          result.recommendations.push("Your documented revenue significantly differs from your stated revenue. Please verify your records.");
+        } else {
+          result.score += 5; // Bonus for accurate records
+        }
+      }
+
       const assessmentResult: AssessmentResult = {
         ...result,
         id: assessmentId,
         businessId: bizId,
         createdAt: serverTimestamp() as any,
+        financialEvidenceId: evidenceSummary?.id
       };
 
       if (!activeBusinessId || view !== 'dashboard') {
@@ -276,6 +313,18 @@ export default function App() {
       }
       
       await setDoc(doc(db, 'assessments', assessmentId), assessmentResult);
+      
+      // 3. Fraud Check (AI Analysis of documents)
+      if (values.documents && values.documents.length > 0 && evidenceSummary) {
+        const fraudResult = await runFraudCheck(assessmentId, newProfile, values.documents, evidenceSummary.monthlyRecords);
+        await setDoc(doc(db, 'fraud_checks', 'fraud_' + assessmentId), fraudResult);
+        
+        if (fraudResult.overallRisk === 'high' || fraudResult.overallRisk === 'critical') {
+          // Flag assessment
+          await updateDoc(doc(db, 'assessments', assessmentId), { flagged: true, fraudRisk: fraudResult.overallRisk });
+        }
+      }
+
       await notificationService.sendAssessmentComplete(user.uid, newProfile.businessName, assessmentResult.score);
 
       setActiveBusinessId(bizId);
@@ -425,6 +474,7 @@ export default function App() {
                   loans={loans} 
                   onApplyLoan={handleApplyLoan} 
                   onReassess={() => setView('assessment')}
+                  onAppeal={(loanId) => { setActiveLoanId(loanId); setView('appeal'); }}
                   currency={user?.currency || 'KES'}
                 />
               )}
@@ -436,6 +486,13 @@ export default function App() {
                 />
               )}
               {view === 'admin' && <AdminDashboard />}
+              {view === 'guarantor_consent' && <GuarantorConsent />}
+              {view === 'appeal' && loans.find(l => l.id === activeLoanId) && (
+                <AppealForm 
+                  loan={loans.find(l => l.id === activeLoanId)!} 
+                  onComplete={() => setView('dashboard')} 
+                />
+              )}
               {view === 'not_found' && <NotFoundPage onGoHome={() => setView('landing')} />}
             </>
           )}

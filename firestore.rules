@@ -28,14 +28,51 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
     }
 
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidString(field, min, max) {
+      return request.resource.data[field] is string && 
+             request.resource.data[field].size() >= min && 
+             request.resource.data[field].size() <= max;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.uid is string &&
+             data.email is string &&
+             data.displayName is string && data.displayName.size() <= 100 &&
+             data.role in ['user', 'admin'] &&
+             data.currency in ['KES', 'USD', 'EUR', 'GBP'];
+    }
+
+    function isValidLoan(data) {
+      return data.amount is number && data.amount > 0 &&
+             data.status in ['pending', 'approved', 'rejected', 'disbursed', 'repaid', 'defaulted'] &&
+             data.userId is string &&
+             data.businessId is string;
+    }
+
+    function isValidNotification(data) {
+      return data.userId is string &&
+             data.type is string &&
+             data.title is string && data.title.size() <= 100 &&
+             data.message is string && data.message.size() <= 500 &&
+             data.read is bool;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) && request.resource.data.role == 'user';
-      allow update: if (isOwner(userId) && areImmutableFieldsUnchanged(['uid', 'email', 'role'])) || isAdmin();
+      allow create: if isOwner(userId) && request.resource.data.role == 'user' && isValidUser(request.resource.data);
+      allow update: if (isOwner(userId) && areImmutableFieldsUnchanged(['uid', 'email', 'role']) && isValidUser(request.resource.data)) || isAdmin();
     }
 
     match /businesses/{businessId} {
@@ -57,17 +94,63 @@ service cloud.firestore {
       allow create: if isAuthenticated() && 
                     request.resource.data.userId == request.auth.uid && 
                     request.resource.data.status == 'pending' &&
-                    request.resource.data.amount > 0 &&
+                    isValidLoan(request.resource.data) &&
                     !isSuspended();
-      allow update: if isAdmin() && areImmutableFieldsUnchanged(['id', 'userId', 'businessId', 'appliedAt', 'assessmentId']);
+      allow update: if (isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid)) && 
+                    areImmutableFieldsUnchanged(['id', 'userId', 'businessId', 'appliedAt', 'assessmentId']) &&
+                    (isAdmin() || areImmutableFieldsUnchanged(['amount', 'interestRate', 'termMonths']));
       allow delete: if isAdmin();
     }
 
+    match /documents/{docId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && areImmutableFieldsUnchanged(['id', 'userId', 'fileUrl', 'type']));
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && resource.data.status == 'pending_review');
+    }
+
+    match /guarantors/{guarantorId} {
+      allow read: if true; 
+      allow create: if isAuthenticated() && request.resource.data.applicantUserId == request.auth.uid;
+      allow update: if isAdmin() || 
+                    (isAuthenticated() && resource.data.applicantUserId == request.auth.uid) ||
+                    (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt', 'consentAcceptedAt', 'ipAddress', 'documents']));
+    }
+
+    match /fraud_checks/{checkId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /financial_evidence/{evidenceId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+    }
+
+    match /kyc_records/{kycId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+    }
+
+    match /appeals/{appealId} {
+      allow read: if isAuthenticated() && (resource.data.applicantUserId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.applicantUserId == request.auth.uid;
+      allow update: if isAdmin();
+    }
+
     match /notifications/{notificationId} {
-      allow read: if isOwner(resource.data.userId);
-      allow update: if isOwner(resource.data.userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
-      allow create: if isAdmin();
-      allow delete: if isOwner(resource.data.userId) || isAdmin();
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && 
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
     }
 
     match /audit_logs/{logId} {
