@@ -1,20 +1,64 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# MicroSeed
 
-# Run and deploy your AI Studio app
+Empowering small businesses with AI-driven potential assessment and microloan opportunities.
 
-This contains everything you need to run your app locally.
+## Overview
 
-View your app in AI Studio: https://ai.studio/apps/2592d98d-3616-463a-9d80-8ff61f2f8b44
+MicroSeed is a full-stack microfinance platform designed to bridge the gap between small business owners and capital. By leveraging the Gemini AI API, the platform provides instant business potential assessments, helping entrepreneurs understand their strengths and weaknesses while determining loan eligibility.
 
-## Run Locally
+## Key Features
 
-**Prerequisites:**  Node.js
+- **AI-Powered Assessment**: Get instant analysis of your business health and growth potential using Google's Gemini Pro.
+- **Microloan Pipeline**: Seamless application process with real-time status tracking (Pending, Approved, Disbursed, Repaid).
+- **Comprehensive Admin Panel**: Full oversight for platform administrators to manage loans, users, and global settings.
+- **Localized for Kenya**: Default currency set to Kenyan Shillings (KES) with localized financial metrics.
+- **Security First**: Robust Firestore security rules, audit logging for administrative actions, and rate-limiting for sensitive operations.
+- **Maintenance Mode**: Ability for admins to toggle platform-wide maintenance mode with custom messaging.
 
+## Tech Stack
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- **Frontend**: React 19, Vite, Tailwind CSS 4
+- **State Management**: React Hooks (useState, useEffect)
+- **UI Components**: shadcn/ui, Lucide React, Framer Motion
+- **Backend**: Firebase (Authentication, Firestore)
+- **AI**: Google Gemini API (@google/genai)
+- **Charts**: Recharts
+- **Notifications**: Sonner (Toasts), Custom Firestore-based notification system
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v18+)
+- Firebase Project
+- Google Gemini API Key
+
+### Installation
+
+1. Clone the repository.
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Set up your environment variables in `.env`:
+   ```env
+   GEMINI_API_KEY=your_gemini_api_key
+   ```
+4. Ensure `firebase-applet-config.json` is present in the root with your Firebase configuration.
+
+### Running the App
+
+```bash
+npm run dev
+```
+
+The app will be available at `http://localhost:3000`.
+
+## Project Structure
+
+- `src/components`: Reusable UI components and page sections.
+- `src/components/admin`: Administrative dashboard modules.
+- `src/services`: Integration logic for Gemini AI and Firebase.
+- `src/lib`: Utility functions, rate limiters, and currency configurations.
+- `src/firebase.ts`: Firebase initialization and custom error handlers.
+- `firestore.rules`: Security rules for database access.
