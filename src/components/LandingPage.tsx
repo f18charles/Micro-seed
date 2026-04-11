@@ -32,8 +32,8 @@ export default function LandingPage({ onStart }: LandingPageProps) {
                 Capital for the <span className="text-primary">Next Billion</span> Businesses
               </h1>
               <p className="mt-6 text-xl text-neutral-600 leading-relaxed">
-                MicroSeed uses AI to assess business potential beyond credit scores. 
-                Get the capital you need to grow your small business in minutes.
+                Whether you have an existing business or a new idea, we have a path for you. 
+                MicroSeed uses AI to assess potential beyond credit scores.
               </p>
             </motion.div>
 

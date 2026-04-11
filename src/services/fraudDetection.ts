@@ -11,7 +11,8 @@ import {
   SubmittedDocument, 
   BusinessProfile, 
   MonthlyFinancialRecord,
-  LoanApplication
+  LoanApplication,
+  PersonalFinancialProfile
 } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
@@ -137,5 +138,84 @@ export async function extractFinancialData(document: SubmittedDocument): Promise
   } catch (error) {
     console.error("Financial extraction failed:", error);
     return [];
+  }
+}
+
+export async function runPersonalFraudCheck(
+  applicationId: string,
+  personalProfile: PersonalFinancialProfile,
+  documents: SubmittedDocument[]
+): Promise<FraudCheckResult> {
+  const prompt = `
+    Analyse these personal M-PESA and bank statements for a startup loan applicant.
+
+    Applicant claimed:
+    - Monthly Income: ${personalProfile.monthlyIncome}
+    - Employment Status: ${personalProfile.employmentStatus}
+    - Monthly M-PESA Activity: ${personalProfile.mpesaMonthlyTurnover}
+
+    Check for:
+    1. Claimed income significantly exceeds documented deposits (>30% deviation)
+    2. Sudden large deposits just before the statement period (possible staging)
+    3. Evidence of existing loan repayments not disclosed
+    4. Consistent overdrafts suggesting inability to manage finances
+    5. M-PESA activity inconsistent with claimed employment status
+    6. Transaction patterns suggesting gambling or high-risk financial behaviour
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            overallRisk: { type: Type.STRING, enum: ["clean", "low", "medium", "high", "critical"] },
+            flags: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  type: { type: Type.STRING },
+                  severity: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  evidence: { type: Type.STRING }
+                }
+              }
+            },
+            confidenceScore: { type: Type.NUMBER },
+            summary: { type: Type.STRING }
+          }
+        }
+      }
+    });
+
+    const aiResult = JSON.parse(response.text || '{}');
+
+    const finalResult: FraudCheckResult = {
+      id: 'fraud_p_' + Date.now(),
+      applicationId,
+      overallRisk: aiResult.overallRisk || 'medium',
+      flags: (aiResult.flags || []).map((f: any) => ({ ...f, detectedAt: new Date().toISOString(), detectedBy: 'ai' })),
+      confidenceScore: aiResult.confidenceScore || 50,
+      claimedRevenue: personalProfile.monthlyIncome,
+      documentedRevenue: 0, // Not applicable for personal
+      revenueDeviation: 0,
+      claimedExpenses: personalProfile.monthlyRent + (personalProfile.monthlyLoanRepayments || 0),
+      documentedExpenses: 0,
+      expensesDeviation: 0,
+      withinAcceptableRange: true,
+      summary: aiResult.summary || "Personal financial integrity check complete.",
+      checkedAt: serverTimestamp() as any,
+      checkedBy: 'ai'
+    };
+
+    await setDoc(doc(db, 'fraud_checks', applicationId), finalResult);
+    return finalResult;
+  } catch (error) {
+    console.error("Personal fraud check failed:", error);
+    throw error;
   }
 }

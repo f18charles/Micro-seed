@@ -1,6 +1,13 @@
 import { motion } from "motion/react";
 import { useState } from "react";
-import { AssessmentResult, BusinessProfile, LoanApplication, Currency } from "../types";
+import { 
+  AssessmentResult, 
+  BusinessProfile, 
+  LoanApplication, 
+  Currency,
+  StartupAssessmentResult,
+  GraduationRecord
+} from "../types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Progress } from "./ui/progress";
 import { Badge } from "./ui/badge";
@@ -15,7 +22,10 @@ import {
   ChevronDown, 
   ChevronUp,
   RefreshCw,
-  Calendar
+  Calendar,
+  Rocket,
+  ShieldCheck as ShieldIcon,
+  Award
 } from "lucide-react";
 import { 
   LineChart, 
@@ -24,17 +34,28 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  ResponsiveContainer 
+  ResponsiveContainer,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar
 } from "recharts";
 import LoanApplicationModal from "./LoanApplicationModal";
 import RepaymentSchedule from "./RepaymentSchedule";
 import PaymentView from "./PaymentView";
 import GuarantorInvitation from "./GuarantorInvitation";
+import { MilestoneDisbursement } from "./startup/MilestoneDisbursement";
+import { GraduationCheck } from "./startup/GraduationCheck";
 import { formatCurrency } from "../lib/currency";
 import { formatDate } from "../lib/utils";
 import { generateGrowthPlan } from "../services/gemini";
+import { checkGraduationEligibility } from "../services/graduationService";
 import { toast } from "sonner";
 import { cn } from "../lib/utils";
+import { onSnapshot, collection, query, where } from "firebase/firestore";
+import { db } from "../firebase";
+import { useEffect } from "react";
 
 interface DashboardProps {
   profile: BusinessProfile;
@@ -53,8 +74,24 @@ export default function Dashboard({ profile, assessment, allAssessments, loans, 
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [growthPlan, setGrowthPlan] = useState<any>(null);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [graduationRecord, setGraduationRecord] = useState<GraduationRecord | null>(null);
 
-  const financialData = [
+  const startupAssessment = assessment as unknown as StartupAssessmentResult;
+  const isStartup = profile.applicationTrack === 'startup';
+
+  const radarData = isStartup && startupAssessment ? [
+    { subject: 'Plan Viability', A: startupAssessment.planViabilityScore, fullMark: 100 },
+    { subject: 'Market', A: startupAssessment.marketScore, fullMark: 100 },
+    { subject: 'Capability', A: startupAssessment.applicantCapabilityScore, fullMark: 100 },
+    { subject: 'Financials', A: startupAssessment.financialReadinessScore, fullMark: 100 },
+    { subject: 'Loan Usage', A: startupAssessment.loanUsageScore, fullMark: 100 },
+  ] : [];
+
+  const financialData = isStartup ? [
+    { name: 'Projected Revenue', amount: profile.projectedMonthlyRevenue },
+    { name: 'Projected Expenses', amount: profile.projectedMonthlyExpenses },
+    { name: 'Profit', amount: (profile.projectedMonthlyRevenue || 0) - (profile.projectedMonthlyExpenses || 0) },
+  ] : [
     { name: 'Revenue', amount: profile.monthlyRevenue },
     { name: 'Expenses', amount: profile.monthlyExpenses },
     { name: 'Profit', amount: profile.monthlyRevenue - profile.monthlyExpenses },
@@ -82,7 +119,10 @@ export default function Dashboard({ profile, assessment, allAssessments, loans, 
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-black tracking-tight text-neutral-900">{profile.businessName}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-4xl font-black tracking-tight text-neutral-900">{profile.businessName}</h1>
+            {isStartup && <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-none">Startup Track</Badge>}
+          </div>
           <p className="text-neutral-500 flex items-center gap-2 mt-1">
             <Badge variant="outline" className="uppercase">{profile.industry.replace("_", " ")}</Badge>
             • {profile.location}
@@ -105,41 +145,102 @@ export default function Dashboard({ profile, assessment, allAssessments, loans, 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Main Stats */}
         <div className="lg:col-span-2 space-y-8">
+          {graduationRecord?.eligibleForGraduation && (
+            <GraduationCheck 
+              record={graduationRecord} 
+              currency={currency} 
+              onApply={() => onReassess()} 
+            />
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="bg-primary text-white border-none shadow-2xl shadow-primary/20">
+            <Card className={cn(
+              "text-white border-none shadow-2xl",
+              isStartup ? "bg-gradient-to-br from-amber-500 to-orange-600 shadow-amber-500/20" : "bg-primary shadow-primary/20"
+            )}>
               <CardHeader>
-                <CardTitle className="text-primary-foreground/80 text-sm font-medium uppercase tracking-wider">Potential Score</CardTitle>
+                <CardTitle className="text-white/80 text-sm font-medium uppercase tracking-wider">
+                  {isStartup ? "Startup Potential Score" : "Business Potential Score"}
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="text-6xl font-black">{assessment?.score || 0}</div>
+                <div className="text-6xl font-black">
+                  {isStartup ? (startupAssessment?.overallScore || 0) : (assessment?.score || 0)}
+                </div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs">
                     <span>Platform Average: 64</span>
-                    <span className="capitalize">{assessment?.potentialRating} Potential</span>
+                    <span className="capitalize">
+                      {isStartup ? (startupAssessment?.overallRating || 'Low') : (assessment?.potentialRating || 'Low')} Potential
+                    </span>
                   </div>
-                  <Progress value={assessment?.score || 0} className="bg-white/20 h-2" />
+                  <Progress value={isStartup ? (startupAssessment?.overallScore || 0) : (assessment?.score || 0)} className="bg-white/20 h-2" />
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm font-medium uppercase tracking-wider text-neutral-500">Monthly Profit</CardTitle>
+                <CardTitle className="text-sm font-medium uppercase tracking-wider text-neutral-500">
+                  {isStartup ? "Projected Monthly Profit" : "Monthly Profit"}
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-4xl font-bold text-neutral-900">
-                  {formatCurrency(profile.monthlyRevenue - profile.monthlyExpenses, currency)}
+                  {formatCurrency(
+                    isStartup 
+                      ? (profile.projectedMonthlyRevenue || 0) - (profile.projectedMonthlyExpenses || 0)
+                      : profile.monthlyRevenue - profile.monthlyExpenses, 
+                    currency
+                  )}
                 </div>
                 <div className="h-[60px] mt-4">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={financialData}>
-                      <Line type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="amount" stroke={isStartup ? "#f59e0b" : "#3b82f6"} strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               </CardContent>
             </Card>
           </div>
+
+          {isStartup && radarData.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-bold flex items-center gap-2">
+                  <Rocket className="h-4 w-4 text-amber-500" />
+                  Startup Readiness Analysis
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex justify-center py-6">
+                <div className="h-[300px] w-full max-w-md">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
+                      <PolarGrid />
+                      <PolarAngleAxis dataKey="subject" />
+                      <PolarRadiusAxis angle={30} domain={[0, 100]} />
+                      <Radar
+                        name="Startup"
+                        dataKey="A"
+                        stroke="#f59e0b"
+                        fill="#f59e0b"
+                        fillOpacity={0.6}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {activeLoan?.applicationTrack === 'startup' && activeLoan.disbursementMilestones && (
+            <MilestoneDisbursement 
+              milestones={activeLoan.disbursementMilestones} 
+              currency={currency}
+              onUploadEvidence={(num) => toast.info(`Upload evidence for milestone ${num}`)}
+            />
+          )}
 
           {/* AI Analysis */}
           <Card>
@@ -157,7 +258,7 @@ export default function Dashboard({ profile, assessment, allAssessments, loans, 
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="p-4 bg-neutral-50 rounded-xl text-neutral-700 leading-relaxed text-sm">
-                {assessment?.analysis}
+                {assessment?.analysis || (assessment as any)?.viabilityAnalysis}
               </div>
               
               {growthPlan && (

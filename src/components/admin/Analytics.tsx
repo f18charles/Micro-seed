@@ -55,6 +55,11 @@ export default function Analytics() {
     return acc;
   }, []).map(d => ({ ...d, name: d.name.replace("_", " ").toUpperCase() }));
 
+  const trackData = [
+    { name: 'Existing Business', value: businessData.filter(b => b.applicationTrack === 'existing' || !b.applicationTrack).length },
+    { name: 'Startup', value: businessData.filter(b => b.applicationTrack === 'startup').length },
+  ].filter(d => d.value > 0);
+
   if (isLoading) return <div className="p-12 text-center">Loading analytics...</div>;
 
   return (
@@ -113,6 +118,33 @@ export default function Analytics() {
                 <Tooltip />
                 <Bar dataKey="value" fill="#f97316" radius={[4, 4, 0, 0]} />
               </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Track Distribution */}
+        <Card className="border-none shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-lg">Application Track Distribution</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={trackData}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                >
+                  {trackData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>

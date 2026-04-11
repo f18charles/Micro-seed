@@ -9,6 +9,8 @@ export type BusinessIndustry =
   | 'technology' 
   | 'other';
 
+export type ApplicationTrack = 'existing' | 'startup';
+
 export interface BusinessProfile {
   id: string;
   userId: string;
@@ -20,11 +22,20 @@ export interface BusinessProfile {
   location: string;
   description: string;
   goals: string;
+  applicationTrack: ApplicationTrack;
+  // For startup track only
+  startupStage?: StartupStage;
+  projectedMonthlyRevenue?: number;
+  projectedMonthlyExpenses?: number;
+  targetMarket?: string;
+  uniqueValueProposition?: string;
+  fundingUsagePlan?: string;
   createdAt: string | Timestamp;
 }
 
 export interface AssessmentResult {
   id: string;
+  userId: string;
   businessId: string;
   score: number; // 0-100
   potentialRating: 'low' | 'medium' | 'high' | 'exceptional';
@@ -58,6 +69,12 @@ export interface LoanApplication {
   status: 'pending' | 'approved' | 'rejected' | 'disbursed' | 'repaid' | 'written_off';
   appliedAt: string | Timestamp;
   assessmentId: string;
+  applicationTrack: ApplicationTrack;
+  startupProfileId?: string;
+  startupAssessmentId?: string;
+  disbursementMilestones?: DisbursementMilestone[];
+  disbursementType?: 'lumpsum' | 'milestonebased';
+  graduationEligible?: boolean;
   repaymentSchedule?: RepaymentSchedule[];
   disbursedAt?: string | Timestamp;
   disbursedBy?: string;         // admin uid
@@ -98,6 +115,16 @@ export type DocumentType =
   | 'sales_records'            // Sales/invoice records (CSV, PDF, or image)
   | 'procurement_records'      // Purchase/expense records
   | 'business_plan'            // For appeal applicants
+  | 'personalbankstatement'
+  | 'personalmpesastatement'
+  | 'payslip'
+  | 'employment_letter'
+  | 'businessplandocument'
+  | 'supplier_quote'
+  | 'premises_photo'
+  | 'training_certificate'
+  | 'sacco_statement'
+  | 'milestone_evidence'     // photos/receipts proving a milestone was completed
   | 'guarantor_id'             // Guarantor's national ID
   | 'guarantor_kra'            // Guarantor's KRA PIN
   | 'guarantor_consent'        // Signed guarantor consent form
@@ -257,6 +284,24 @@ export interface LenderConfig {
   appealWindowDays: number;      // how many days after rejection to appeal
   disbursementMethod: 'mpesa' | 'bank_transfer' | 'manual';
   repaymentMethods: ('mpesa' | 'bank_transfer' | 'cash')[];
+  
+  // Startup Loans
+  startupLoansEnabled: boolean;
+  maxStartupLoanAmount: number;
+  startupLoanTerms: number[];
+  startupMinGuarantors: number;
+  startupDefaultInterestRate: number;
+  startupRequiredDocumentTypes: DocumentType[];
+  allowMilestoneDisbursement: boolean;
+  requireMilestoneDisbursement: boolean;
+  milestoneMaxCount: number;
+  enableGraduation: boolean;
+  graduationMinRepaymentScore: number;
+  graduationMultiplierTiers: {
+    minRepaymentScore: number;
+    multiplier: number;
+  }[];
+
   updatedAt: string | Timestamp;
   updatedBy: string;             // admin uid
 }
@@ -329,12 +374,168 @@ export interface KycRecord {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'loan_approved' | 'loan_rejected' | 'loan_disbursed' | 'repayment_due' | 'repayment_overdue' | 'assessment_complete';
+  type: 'loan_approved' | 'loan_rejected' | 'loan_disbursed' | 'repayment_due' | 'repayment_overdue' | 'assessment_complete' | 'milestone_verified' | 'milestone_rejected' | 'graduation_eligible';
   title: string;
   message: string;
   read: boolean;
   createdAt: string | Timestamp;
   loanId?: string;
+}
+
+export type StartupStage =
+  | 'idea'              // just an idea, nothing built yet
+  | 'planning'          // researching, writing business plan
+  | 'pre_launch'        // ready to launch, needs capital to start
+  | 'launchednorevenue'; // trading but not yet generating revenue
+
+export interface StartupProfile {
+  id: string;
+  userId: string;
+  businessProfileId: string;   // linked to BusinessProfile
+  loanApplicationId?: string;
+  stage: StartupStage;
+
+  // The idea
+  businessName: string;
+  industry: BusinessIndustry;
+  location: string;
+  description: string;           // what the business will do
+  targetMarket: string;          // who the customers are
+  uniqueValueProposition: string; // why customers will choose this business
+  competitorAnalysis: string;    // who else does this, and why this is better
+
+  // The plan
+  fundingUsagePlan: string;      // line-by-line: "30,000 for stock, 10,000 for rent deposit"
+  projectedMonthlyRevenue: number;  // month 3 projection (after ramp-up)
+  projectedMonthlyExpenses: number;
+  revenueJustification: string;  // how did you arrive at this projection?
+  breakEvenMonths: number;       // estimated months to break even
+  
+  // Applicant background
+  relevantExperience: string;    // prior work/skills relevant to the business
+  hasWorkedInIndustry: boolean;
+  yearsExperienceInIndustry?: number;
+
+  // Loan usage
+  requestedAmount: number;
+  loanUsageBreakdown: LoanUsageItem[]; // itemised usage plan
+
+  createdAt: string | Timestamp;
+  updatedAt: string | Timestamp;
+}
+
+export interface LoanUsageItem {
+  item: string;           // e.g. "Initial stock purchase"
+  cost: number;         // e.g. 45000
+  category: 'stock' | 'equipment' | 'premises' | 'marketing' | 'working_capital' | 'other';
+  isEssential: boolean;   // must have vs nice to have
+}
+
+export interface PersonalFinancialProfile {
+  id: string;
+  userId: string;
+  applicationId: string;
+
+  // Income
+  employmentStatus: 'employed' | 'self_employed' | 'unemployed' | 'student' | 'other';
+  monthlyIncome: number;         // current personal income
+  incomeSource: string;          // employer name or income description
+  hasOtherIncome: boolean;
+  otherIncomeAmount?: number;
+  otherIncomeSource?: string;
+
+  // Obligations
+  monthlyRent: number;
+  monthlyLoanRepayments: number; // existing personal loan payments
+  monthlySavings: number;
+  otherMonthlyExpenses: number;
+
+  // Savings & assets
+  hasSavings: boolean;
+  estimatedSavings?: number;     // rough estimate, not verified
+  hasProperty: boolean;          // owns land or property (not collateral, just profile info)
+  hasMobileMoneyHistory: boolean; // active M-PESA user
+  mpesaMonthlyTurnover?: number; // average monthly M-PESA transactions
+
+  // Credit history
+  hasExistingLoans: boolean;
+  existingLoanDetails?: string;
+  hasDefaultedBefore: boolean;
+  defaultDetails?: string;
+
+  createdAt: string | Timestamp;
+}
+
+export interface StartupAssessmentResult {
+  id: string;
+  userId: string;
+  startupProfileId: string;
+  applicationId: string;
+
+  // Scores (each 0–100)
+  planViabilityScore: number;    // Is the business plan realistic and coherent?
+  marketScore: number;           // Is there a clear market and demand?
+  applicantCapabilityScore: number; // Does the applicant have relevant skills/experience?
+  financialReadinessScore: number;  // Personal finances support repayment capacity?
+  loanUsageScore: number;        // Is the loan usage plan specific and sensible?
+  overallScore: number;          // Weighted average
+
+  // Ratings
+  planRating: 'weak' | 'fair' | 'solid' | 'strong';
+  overallRating: 'low' | 'medium' | 'high' | 'exceptional';
+
+  // AI analysis
+  planStrengths: string[];
+  planWeaknesses: string[];
+  riskFactors: string[];
+  recommendations: string[];
+  marketAnalysis: string;
+  viabilityAnalysis: string;
+
+  // Loan eligibility
+  loanEligibility: {
+    eligible: boolean;
+    maxAmount: number;
+    interestRate: number;
+    termMonths: number;
+    reasoning: string;
+    conditions: string[];        // e.g. "Requires 2 verified guarantors", "Must submit receipt within 30 days of each purchase"
+  };
+
+  // Milestone-based disbursement recommendation
+  recommendsMilestoneDisbursement: boolean;
+  milestones?: DisbursementMilestone[];
+
+  createdAt: string | Timestamp;
+}
+
+export interface DisbursementMilestone {
+  milestoneNumber: number;
+  description: string;           // e.g. "Premises secured and stock purchased"
+  amount: number;      // portion of total loan
+  triggerCondition: string;      // what the borrower must prove
+  requiredEvidence: DocumentType[]; // which docs prove completion
+  dueWithinDays: number;         // deadline from loan approval
+  status: 'pending' | 'evidence_submitted' | 'verified' | 'disbursed' | 'missed';
+  evidenceDocumentIds?: string[];
+  verifiedAt?: string | Timestamp;
+  verifiedBy?: string;           // admin uid
+  disbursedAt?: string | Timestamp;
+}
+
+export interface GraduationRecord {
+  id: string;
+  userId: string;
+  originalLoanId: string;
+  businessProfileId: string;
+  repaymentsOnTime: number;      // count of on-time payments
+  repaymentsTotal: number;
+  repaymentScore: number;        // 0–100 based on payment behaviour
+  businessNowOperating: boolean;
+  revenueVerified: boolean;
+  eligibleForGraduation: boolean;
+  graduationLoanMaxAmount: number;
+  assessedAt: string | Timestamp;
 }
 
 export interface AdminStats {

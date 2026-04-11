@@ -1,7 +1,19 @@
 import { useState, useEffect } from "react";
 import { db } from "../../firebase";
-import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, onSnapshot, orderBy } from "firebase/firestore";
-import { LoanApplication, BusinessProfile, AssessmentResult, UserProfile, AuditLog, RepaymentSchedule } from "../../types";
+import { doc, getDoc, updateDoc, serverTimestamp, collection, query, where, onSnapshot, orderBy, getDocs } from "firebase/firestore";
+import { 
+  LoanApplication, 
+  BusinessProfile, 
+  AssessmentResult, 
+  UserProfile, 
+  AuditLog, 
+  RepaymentSchedule,
+  StartupProfile,
+  PersonalFinancialProfile,
+  StartupAssessmentResult,
+  LenderConfig
+} from "../../types";
+import { graduationService } from "../../services/graduationService";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
@@ -15,10 +27,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  TrendingUp,
   Ban,
   Banknote,
   FileText,
-  MessageSquare
+  MessageSquare,
+  Rocket,
+  Wallet
 } from "lucide-react";
 import { formatCurrency } from "../../lib/currency";
 import { formatDate } from "../../lib/utils";
@@ -47,6 +62,8 @@ export default function LoanDetailDrawer({ loanId, onClose }: LoanDetailDrawerPr
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [assessment, setAssessment] = useState<AssessmentResult | null>(null);
   const [applicant, setApplicant] = useState<UserProfile | null>(null);
+  const [startupProfile, setStartupProfile] = useState<StartupProfile | null>(null);
+  const [personalFinancial, setPersonalFinancial] = useState<PersonalFinancialProfile | null>(null);
   const [auditTrail, setAuditTrail] = useState<AuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -68,15 +85,35 @@ export default function LoanDetailDrawer({ loanId, onClose }: LoanDetailDrawerPr
         setLoan(loanData);
         setInternalNotes(loanData.internalNotes || "");
 
-        const [bizDoc, userDoc, asmtDoc] = await Promise.all([
+        const promises: Promise<any>[] = [
           getDoc(doc(db, "businesses", loanData.businessId)),
           getDoc(doc(db, "users", loanData.userId)),
-          getDoc(doc(db, "assessments", loanData.assessmentId))
-        ]);
+        ];
 
-        if (bizDoc.exists()) setBusiness(bizDoc.data() as BusinessProfile);
-        if (userDoc.exists()) setApplicant(userDoc.data() as UserProfile);
-        if (asmtDoc.exists()) setAssessment(asmtDoc.data() as AssessmentResult);
+        if (loanData.applicationTrack === 'startup') {
+          promises.push(getDoc(doc(db, "startup_assessments", loanData.startupAssessmentId || '')));
+          if (loanData.startupProfileId) {
+            promises.push(getDoc(doc(db, "startup_profiles", loanData.startupProfileId)));
+          }
+          // Try to find personal financial profile
+          const pfQuery = query(collection(db, "personalfinancialprofiles"), where("userId", "==", loanData.userId));
+          promises.push(getDocs(pfQuery));
+        } else {
+          promises.push(getDoc(doc(db, "assessments", loanData.assessmentId)));
+        }
+
+        const results = await Promise.all(promises);
+        
+        if (results[0].exists()) setBusiness(results[0].data() as BusinessProfile);
+        if (results[1].exists()) setApplicant(results[1].data() as UserProfile);
+        
+        if (loanData.applicationTrack === 'startup') {
+          if (results[2].exists()) setAssessment(results[2].data() as any);
+          if (results[3]?.exists()) setStartupProfile(results[3].data() as StartupProfile);
+          if (results[4] && !results[4].empty) setPersonalFinancial(results[4].docs[0].data() as PersonalFinancialProfile);
+        } else {
+          if (results[2].exists()) setAssessment(results[2].data() as AssessmentResult);
+        }
 
         // Audit Trail
         const logsQuery = query(
@@ -201,11 +238,25 @@ export default function LoanDetailDrawer({ loanId, onClose }: LoanDetailDrawerPr
   const handleDisburse = async () => {
     if (!loan) return;
     try {
-      const update = {
+      let update: any = {
         status: 'disbursed',
         disbursedAt: serverTimestamp(),
         disbursedBy: "admin"
       };
+
+      // If it's a startup loan with milestones, only disburse the first one
+      if (loan.applicationTrack === 'startup' && loan.disbursementMilestones) {
+        const milestones = [...loan.disbursementMilestones];
+        if (milestones.length > 0 && milestones[0].status === 'pending') {
+          milestones[0].status = 'disbursed';
+          milestones[0].disbursedAt = new Date().toISOString();
+          update.disbursementMilestones = milestones;
+          // Keep status as 'approved' or 'disbursed'? 
+          // Usually 'disbursed' means the whole loan is out, but for milestones it's partial.
+          // Let's keep it as 'disbursed' but track milestones.
+        }
+      }
+
       await updateDoc(doc(db, "loans", loanId), update);
       await auditLogService.writeAuditLog({
         action: 'loan_disbursed',
@@ -221,6 +272,81 @@ export default function LoanDetailDrawer({ loanId, onClose }: LoanDetailDrawerPr
       toast.success("Loan marked as disbursed");
     } catch (error) {
       toast.error("Disbursement update failed");
+    }
+  };
+
+  const handleVerifyMilestone = async (milestoneNumber: number) => {
+    if (!loan || !loan.disbursementMilestones) return;
+    try {
+      const milestones = [...loan.disbursementMilestones];
+      const index = milestones.findIndex(m => m.milestoneNumber === milestoneNumber);
+      if (index === -1) return;
+
+      milestones[index].status = 'verified';
+      milestones[index].verifiedAt = new Date().toISOString();
+      milestones[index].verifiedBy = "admin";
+
+      // Auto-disburse if verified? Or separate step?
+      // Let's make it a separate step for safety, but here we just verify.
+      
+      await updateDoc(doc(db, "loans", loanId), { disbursementMilestones: milestones });
+      setLoan({ ...loan, disbursementMilestones: milestones });
+      toast.success(`Milestone ${milestoneNumber} verified`);
+    } catch (error) {
+      toast.error("Failed to verify milestone");
+    }
+  };
+
+  const handleDisburseMilestone = async (milestoneNumber: number) => {
+    if (!loan || !loan.disbursementMilestones) return;
+    try {
+      const milestones = [...loan.disbursementMilestones];
+      const index = milestones.findIndex(m => m.milestoneNumber === milestoneNumber);
+      if (index === -1) return;
+
+      milestones[index].status = 'disbursed';
+      milestones[index].disbursedAt = new Date().toISOString();
+
+      await updateDoc(doc(db, "loans", loanId), { disbursementMilestones: milestones });
+      setLoan({ ...loan, disbursementMilestones: milestones });
+      toast.success(`Milestone ${milestoneNumber} disbursed`);
+    } catch (error) {
+      toast.error("Failed to disburse milestone");
+    }
+  };
+
+  const handleMarkAsRepaid = async () => {
+    if (!loan) return;
+    try {
+      const update = {
+        status: 'repaid',
+        repaidAt: serverTimestamp()
+      };
+      await updateDoc(doc(db, "loans", loanId), update);
+      
+      // Check for graduation if startup loan
+      if (loan.applicationTrack === 'startup') {
+        const configSnap = await getDoc(doc(db, 'app_settings', 'lender_config'));
+        const config = configSnap.data() as LenderConfig;
+        
+        if (config.enableGraduation) {
+          const isEligible = await graduationService.checkEligibility(loan.userId, loanId);
+          if (isEligible) {
+            await graduationService.recordGraduation(loan.userId, loanId, 250000); // Example next limit
+            toast.success("Loan repaid! Borrower is eligible for graduation.");
+          } else {
+            toast.success("Loan marked as repaid");
+          }
+        } else {
+          toast.success("Loan marked as repaid");
+        }
+      } else {
+        toast.success("Loan marked as repaid");
+      }
+
+      setLoan({ ...loan, ...update, status: 'repaid' } as any);
+    } catch (error) {
+      toast.error("Failed to mark as repaid");
     }
   };
 
@@ -294,6 +420,12 @@ export default function LoanDetailDrawer({ loanId, onClose }: LoanDetailDrawerPr
               <Info className="h-4 w-4 mr-2" />
               Loan Info
             </TabsTrigger>
+            {loan.applicationTrack === 'startup' && (
+              <TabsTrigger value="startup" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-full px-0 bg-transparent shadow-none">
+                <Rocket className="h-4 w-4 mr-2" />
+                Startup Plan
+              </TabsTrigger>
+            )}
             <TabsTrigger value="business" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none h-full px-0 bg-transparent shadow-none">
               <Building2 className="h-4 w-4 mr-2" />
               Business
@@ -350,6 +482,98 @@ export default function LoanDetailDrawer({ loanId, onClose }: LoanDetailDrawerPr
               />
               <p className="text-[10px] text-muted-foreground italic">Notes are only visible to other admins.</p>
             </div>
+          </TabsContent>
+
+          <TabsContent value="startup" className="mt-0 space-y-6">
+            {startupProfile && (
+              <div className="space-y-6">
+                <div className="p-4 bg-amber-50 rounded-xl border border-amber-100">
+                  <h4 className="text-sm font-bold text-amber-900 mb-2">Startup Stage: {startupProfile.stage.toUpperCase()}</h4>
+                  <p className="text-xs text-amber-800 leading-relaxed">{startupProfile.description}</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-neutral-50 rounded-lg border">
+                    <p className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Projected Revenue</p>
+                    <p className="text-sm font-bold">{formatCurrency(startupProfile.projectedMonthlyRevenue, 'KES')}</p>
+                  </div>
+                  <div className="p-3 bg-neutral-50 rounded-lg border">
+                    <p className="text-[10px] text-muted-foreground uppercase font-bold mb-1">Break-even</p>
+                    <p className="text-sm font-bold">{startupProfile.breakEvenMonths} Months</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-[10px] text-muted-foreground uppercase font-bold">Loan Usage Breakdown</p>
+                  <div className="space-y-2">
+                    {startupProfile.loanUsageBreakdown.map((item, i) => (
+                      <div key={i} className="flex justify-between items-center p-2 bg-white border rounded text-xs">
+                        <span className="font-medium">{item.item}</span>
+                        <span className="font-bold">{formatCurrency(item.cost, 'KES')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {personalFinancial && (
+                  <div className="space-y-2 pt-4 border-t">
+                    <h4 className="text-sm font-bold flex items-center gap-2">
+                      <Wallet className="h-4 w-4 text-primary" />
+                      Personal Financial Health
+                    </h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase font-bold">Monthly Income</p>
+                        <p className="text-sm font-medium">{formatCurrency(personalFinancial.monthlyIncome, 'KES')}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase font-bold">M-PESA Turnover</p>
+                        <p className="text-sm font-medium">{formatCurrency(personalFinancial.mpesaMonthlyTurnover, 'KES')}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {loan.disbursementMilestones && (
+                  <div className="space-y-4 pt-4 border-t">
+                    <h4 className="text-sm font-bold flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-primary" />
+                      Disbursement Milestones
+                    </h4>
+                    <div className="space-y-3">
+                      {loan.disbursementMilestones.map((m) => (
+                        <div key={m.milestoneNumber} className="p-3 bg-white border rounded-lg space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs font-bold">Milestone {m.milestoneNumber}: {m.description}</span>
+                            <Badge variant={
+                              m.status === 'disbursed' ? 'secondary' : 
+                              m.status === 'verified' ? 'outline' : 'default'
+                            } className="text-[10px]">
+                              {m.status.toUpperCase()}
+                            </Badge>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-xs font-medium">{formatCurrency(m.amount, 'KES')}</span>
+                            <div className="flex gap-2">
+                              {m.status === 'pending' && (
+                                <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => handleVerifyMilestone(m.milestoneNumber)}>
+                                  Verify
+                                </Button>
+                              )}
+                              {m.status === 'verified' && (
+                                <Button size="sm" className="h-7 text-[10px]" onClick={() => handleDisburseMilestone(m.milestoneNumber)}>
+                                  Disburse
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="business" className="mt-0 space-y-6">
@@ -491,6 +715,12 @@ export default function LoanDetailDrawer({ loanId, onClose }: LoanDetailDrawerPr
               Approve Loan
             </Button>
           </>
+        )}
+        {loan.status === 'disbursed' && (
+          <Button onClick={handleMarkAsRepaid} className="h-12 flex-1 font-bold bg-green-600 hover:bg-green-700">
+            <CheckCircle2 className="h-4 w-4 mr-2" />
+            Mark as Repaid
+          </Button>
         )}
         {loan.status === 'approved' && (
           <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => setIsDisburseDialogOpen(true)}>

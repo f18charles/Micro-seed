@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import LandingPage from "./components/LandingPage";
 import AssessmentForm from "./components/AssessmentForm";
+import { StartupAssessmentForm } from "./components/startup/StartupAssessmentForm";
+import { TrackSelection } from "./components/TrackSelection";
 import Dashboard from "./components/Dashboard";
 import ProfilePage from "./components/ProfilePage";
 import AdminDashboard from "./components/admin/AdminDashboard";
@@ -11,9 +13,21 @@ import NotificationBell from "./components/NotificationBell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DashboardSkeleton } from "./components/LoadingSkeletons";
 import BusinessSelector from "./components/BusinessSelector";
-import { BusinessProfile, AssessmentResult, LoanApplication, UserProfile, Currency, GlobalSettings } from "./types";
+import { 
+  BusinessProfile, 
+  AssessmentResult, 
+  LoanApplication, 
+  UserProfile, 
+  Currency, 
+  GlobalSettings,
+  ApplicationTrack,
+  StartupProfile,
+  PersonalFinancialProfile,
+  StartupAssessmentResult
+} from "./types";
 import { assessBusinessPotential } from "./services/gemini";
-import { runFraudCheck } from "./services/fraudDetection";
+import { assessStartupPotential } from "./services/startupAssessment";
+import { runFraudCheck, runPersonalFraudCheck } from "./services/fraudDetection";
 import { buildFinancialEvidenceSummary } from "./services/financialEvidence";
 import { notificationService } from "./services/notifications";
 import { Toaster, toast } from "sonner";
@@ -35,7 +49,7 @@ import {
   DropdownMenuSeparator
 } from "./components/ui/dropdown-menu";
 
-type View = 'landing' | 'assessment' | 'dashboard' | 'profile' | 'admin' | 'not_found' | 'guarantor_consent' | 'appeal';
+type View = 'landing' | 'track_selection' | 'assessment' | 'startup_assessment' | 'dashboard' | 'profile' | 'admin' | 'not_found' | 'guarantor_consent' | 'appeal';
 
 export default function App() {
   const [view, setView] = useState<View>('landing');
@@ -48,6 +62,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [activeLoanId, setActiveLoanId] = useState<string | null>(null);
+  const [selectedTrack, setSelectedTrack] = useState<ApplicationTrack | null>(null);
 
   // Check for guarantor token on load
   useEffect(() => {
@@ -152,6 +167,7 @@ export default function App() {
 
     const assessmentsQuery = query(
       collection(db, 'assessments'), 
+      where('userId', '==', user.uid),
       where('businessId', '==', activeBusinessId),
       orderBy('createdAt', 'desc')
     );
@@ -163,6 +179,7 @@ export default function App() {
 
     const loansQuery = query(
       collection(db, 'loans'), 
+      where('userId', '==', user.uid),
       where('businessId', '==', activeBusinessId), 
       orderBy('appliedAt', 'desc')
     );
@@ -270,6 +287,7 @@ export default function App() {
         ...values,
         id: bizId,
         userId: user.uid,
+        applicationTrack: 'existing',
         createdAt: serverTimestamp() as any,
       };
       
@@ -301,6 +319,7 @@ export default function App() {
       const assessmentResult: AssessmentResult = {
         ...result,
         id: assessmentId,
+        userId: user.uid,
         businessId: bizId,
         createdAt: serverTimestamp() as any,
         financialEvidenceId: evidenceSummary?.id
@@ -338,6 +357,108 @@ export default function App() {
     }
   };
 
+  const handleStartupAssessmentSubmit = async (values: any) => {
+    if (!user) return;
+    if (!checkRateLimit('assessment', 3, 60 * 60 * 1000)) {
+      toast.error("You've submitted too many assessments. Please wait an hour.");
+      return;
+    }
+    recordAttempt('assessment');
+    
+    setIsLoading(true);
+    try {
+      const bizId = 'biz_' + Date.now();
+      const assessmentId = 'st_asmt_' + Date.now();
+      
+      const startupProfile: StartupProfile = {
+        ...values,
+        id: 'st_prof_' + Date.now(),
+        userId: user.uid,
+        businessProfileId: bizId,
+        createdAt: serverTimestamp() as any,
+        updatedAt: serverTimestamp() as any,
+      };
+
+      const personalFinancial: PersonalFinancialProfile = {
+        id: 'pers_fin_' + Date.now(),
+        userId: user.uid,
+        applicationId: '', // Will be linked when applying for loan
+        employmentStatus: values.employmentStatus,
+        monthlyIncome: values.monthlyIncome,
+        incomeSource: values.incomeSource || 'Self-reported',
+        hasOtherIncome: values.hasOtherIncome || false,
+        monthlyRent: values.monthlyExpenses,
+        monthlyLoanRepayments: values.monthlyLoanRepayment || 0,
+        monthlySavings: 0,
+        otherMonthlyExpenses: 0,
+        hasSavings: values.hasSavings,
+        estimatedSavings: values.savingsAmount,
+        hasProperty: false,
+        hasMobileMoneyHistory: true,
+        mpesaMonthlyTurnover: values.mpesaActivity === 'under_5000' ? 2500 : values.mpesaActivity === '5000_20000' ? 12500 : values.mpesaActivity === '20000_50000' ? 35000 : 75000,
+        hasExistingLoans: values.hasExistingLoans,
+        hasDefaultedBefore: false,
+        createdAt: serverTimestamp() as any,
+      };
+
+      const businessProfile: BusinessProfile = {
+        id: bizId,
+        userId: user.uid,
+        businessName: values.businessName,
+        industry: values.industry,
+        yearsInOperation: 0,
+        monthlyRevenue: 0,
+        monthlyExpenses: 0,
+        location: values.location,
+        description: values.description,
+        goals: values.whySuccess,
+        applicationTrack: 'startup',
+        startupStage: values.stage,
+        projectedMonthlyRevenue: values.projectedMonthlyRevenue,
+        projectedMonthlyExpenses: values.projectedMonthlyExpenses,
+        targetMarket: values.targetMarket,
+        uniqueValueProposition: values.uniqueValueProposition,
+        fundingUsagePlan: values.fundingUsagePlan,
+        createdAt: serverTimestamp() as any,
+      };
+
+      // 1. AI Startup Assessment
+      const result = await assessStartupPotential(startupProfile, personalFinancial, globalSettings || { maxStartupLoanAmount: 100000, minLoanAmount: 5000, availableTerms: [3, 6, 12] } as any);
+      
+      const assessmentResult: StartupAssessmentResult = {
+        ...result,
+        id: assessmentId,
+        userId: user.uid,
+        startupProfileId: startupProfile.id,
+        applicationId: '',
+        createdAt: serverTimestamp() as any,
+      };
+
+      // Save to Firestore
+      await setDoc(doc(db, 'businesses', bizId), businessProfile);
+      await setDoc(doc(db, 'startup_profiles', startupProfile.id), startupProfile);
+      await setDoc(doc(db, 'personalfinancialprofiles', personalFinancial.id), personalFinancial);
+      await setDoc(doc(db, 'startup_assessments', assessmentId), assessmentResult);
+
+      // 2. Personal Fraud Check
+      if (values.documents && values.documents.length > 0) {
+        const fraudResult = await runPersonalFraudCheck(assessmentId, personalFinancial, values.documents);
+        await setDoc(doc(db, 'fraud_checks', 'fraud_' + assessmentId), fraudResult);
+      }
+
+      await notificationService.sendAssessmentComplete(user.uid, businessProfile.businessName, assessmentResult.overallScore);
+
+      setActiveBusinessId(bizId);
+      setView('dashboard');
+      toast.success("Startup assessment complete!");
+    } catch (error) {
+      console.error("Startup assessment error:", error);
+      toast.error("Failed to analyze startup plan. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleApplyLoan = async (amount: number) => {
     if (!user || !activeBusinessId || assessments.length === 0) return;
     if (!checkRateLimit('loan_application', 2, 24 * 60 * 60 * 1000)) {
@@ -356,6 +477,7 @@ export default function App() {
         status: 'pending',
         appliedAt: serverTimestamp() as any,
         assessmentId: assessments[0].id,
+        applicationTrack: selectedTrack || 'existing'
       };
 
       await setDoc(doc(db, 'loans', loanId), newLoan);
@@ -387,7 +509,7 @@ export default function App() {
                     businesses={businesses} 
                     activeId={activeBusinessId} 
                     onSelect={setActiveBusinessId} 
-                    onAddNew={() => setView('assessment')}
+                    onAddNew={() => setView('track_selection')}
                   />
                 </div>
               )}
@@ -457,13 +579,26 @@ export default function App() {
             <DashboardSkeleton />
           ) : (
             <>
-              {view === 'landing' && <LandingPage onStart={() => setView(user ? (businesses.length > 0 ? 'dashboard' : 'assessment') : 'landing')} />}
+              {view === 'landing' && <LandingPage onStart={() => setView(user ? (businesses.length > 0 ? 'dashboard' : 'track_selection') : 'landing')} />}
+              {view === 'track_selection' && (
+                <TrackSelection onSelect={(track) => {
+                  setSelectedTrack(track);
+                  setView(track === 'startup' ? 'startup_assessment' : 'assessment');
+                }} />
+              )}
               {view === 'assessment' && (
                 <AssessmentForm 
                   onSubmit={handleAssessmentSubmit} 
                   isLoading={isLoading} 
                   currencySymbol={currencySymbol}
                   initialData={activeBusiness || undefined}
+                />
+              )}
+              {view === 'startup_assessment' && (
+                <StartupAssessmentForm 
+                  onSubmit={handleStartupAssessmentSubmit} 
+                  isLoading={isLoading} 
+                  currencySymbol={currencySymbol}
                 />
               )}
               {view === 'dashboard' && activeBusiness && (
@@ -473,7 +608,7 @@ export default function App() {
                   allAssessments={assessments}
                   loans={loans} 
                   onApplyLoan={handleApplyLoan} 
-                  onReassess={() => setView('assessment')}
+                  onReassess={() => setView(activeBusiness.applicationTrack === 'startup' ? 'startup_assessment' : 'assessment')}
                   onAppeal={(loanId) => { setActiveLoanId(loanId); setView('appeal'); }}
                   currency={user?.currency || 'KES'}
                 />

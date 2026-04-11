@@ -9,7 +9,10 @@ import {
   AlertTriangle,
   Save,
   Loader2,
-  Info
+  Info,
+  Rocket,
+  TrendingUp,
+  Award
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -65,6 +68,13 @@ export default function LenderConfigPanel() {
     appealWindowDays: 14,
     disbursementMethod: 'mpesa',
     repaymentsMethods: ['mpesa', 'bank_transfer'],
+    startupLoansEnabled: true,
+    maxStartupLoanAmount: 100000,
+    startupLoanTerms: [3, 6, 12],
+    startupMinGuarantors: 2,
+    enableMilestoneDisbursement: true,
+    enableGraduation: true,
+    graduationMinRepaymentScore: 80,
     updatedAt: '',
     updatedBy: ''
   } as any);
@@ -395,6 +405,71 @@ export default function LenderConfigPanel() {
                   <SelectItem value="manual">Manual</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Startup Loan Settings */}
+        <Card className="md:col-span-2 border-amber-200 bg-amber-50/30">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2 text-amber-900">
+              <Rocket className="w-5 h-5 text-amber-600" />
+              Startup Loan Track Settings
+            </CardTitle>
+            <CardDescription>Configure parameters for applicants without existing businesses.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="font-bold">Enable Startup Loans</Label>
+                  <Switch 
+                    checked={config.startupLoansEnabled} 
+                    onCheckedChange={(v) => setConfig(prev => ({ ...prev, startupLoansEnabled: v }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Max Startup Amount (KSh)</Label>
+                  <Input 
+                    type="number" 
+                    value={config.maxStartupLoanAmount} 
+                    onChange={(e) => setConfig(prev => ({ ...prev, maxStartupLoanAmount: Number(e.target.value) }))}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="font-bold">Milestone Disbursement</Label>
+                  <Switch 
+                    checked={config.allowMilestoneDisbursement} 
+                    onCheckedChange={(v) => setConfig(prev => ({ ...prev, allowMilestoneDisbursement: v }))}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground italic">
+                  If enabled, startup loans will be released in tranches based on verified business milestones.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="font-bold">Enable Graduation</Label>
+                  <Switch 
+                    checked={config.enableGraduation} 
+                    onCheckedChange={(v) => setConfig(prev => ({ ...prev, enableGraduation: v }))}
+                  />
+                </div>
+                {config.enableGraduation && (
+                  <div className="space-y-2">
+                    <Label className="text-xs">Min Repayment Score for Graduation</Label>
+                    <Input 
+                      type="number" 
+                      value={config.graduationMinRepaymentScore} 
+                      onChange={(e) => setConfig(prev => ({ ...prev, graduationMinRepaymentScore: Number(e.target.value) }))}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
